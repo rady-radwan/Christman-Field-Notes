@@ -42,8 +42,8 @@ void main() {
     final thin = box()..width = 1;
     final thick = box()..width = 3;
     // A point just outside the thin reach is inside the thick reach.
-    expect(hitsMark(thin, const Offset(200, 85), 2, iw), isFalse);
-    expect(hitsMark(thick, const Offset(200, 85), 2, iw), isTrue);
+    expect(hitsMark(thin, const Offset(200, 90), 2, iw), isFalse);
+    expect(hitsMark(thick, const Offset(200, 90), 2, iw), isTrue);
   });
 
   test('cloud path closes around the rectangle', () {

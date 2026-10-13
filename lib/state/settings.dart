@@ -3,9 +3,16 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Server details can be built into the installer (GitHub secrets) or typed in Settings.
-const _builtInUrl = String.fromEnvironment('SUPABASE_URL');
-const _builtInKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+/// The company's shared Field Notes server (Supabase). The publishable key is meant to be
+/// shipped inside apps; the database's security rules (supabase/schema.sql) protect the data.
+const companyServerUrl = 'https://lhffwvrebwcvwpjfhcll.supabase.co';
+const companyServerKey = 'sb_publishable_NiDBo7xCIA5qNrnUEdZTbA_S_JJvVra';
+
+/// A build can still point at another server with --dart-define (e.g. GitHub secrets).
+const _envUrl = String.fromEnvironment('SUPABASE_URL');
+const _envKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+const _builtInUrl = _envUrl == '' ? companyServerUrl : _envUrl;
+const _builtInKey = _envKey == '' ? companyServerKey : _envKey;
 
 class Settings {
   Settings._(this._prefs);
@@ -20,8 +27,10 @@ class Settings {
       };
   Future<void> setThemeMode(ThemeMode m) => _prefs.setString('theme', m.name);
 
-  String get serverUrl => _prefs.getString('server_url') ?? _builtInUrl;
-  String get serverKey => _prefs.getString('server_key') ?? _builtInKey;
+  /// A value typed in Settings wins; otherwise the built-in company server is used.
+  String get serverUrl => _nonEmpty(_prefs.getString('server_url')) ?? _builtInUrl;
+  String get serverKey => _nonEmpty(_prefs.getString('server_key')) ?? _builtInKey;
+  static String? _nonEmpty(String? v) => (v == null || v.trim().isEmpty) ? null : v.trim();
   bool get hasServer => serverUrl.trim().isNotEmpty && serverKey.trim().isNotEmpty;
 
   /// Empty values switch back to "this computer only".

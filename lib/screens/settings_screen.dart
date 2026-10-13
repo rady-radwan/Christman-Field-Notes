@@ -6,7 +6,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import 'admin_screen.dart';
 
-const appVersion = '0.1.0';
+const appVersion = '0.2.0';
 
 Future<void> showServerSettings(BuildContext context) async {
   final state = context.read<AppState>();
@@ -21,7 +21,7 @@ Future<void> showServerSettings(BuildContext context) async {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(
             'Paste the Project URL and the publishable key from your Supabase project '
-            '(Project Settings > API Keys). Leave both empty to keep notes on this computer only.',
+            '(Project Settings > API Keys). Leave both empty to use the Christman company server.',
             style: TextStyle(color: FnColors.of(ctx).muted, height: 1.35),
           ),
           const SizedBox(height: 14),

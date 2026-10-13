@@ -22,8 +22,15 @@ jobs:
           cache: true
       - run: flutter --version
       - run: flutter pub get
-      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
-      - run: flutter test
+      - name: Analyze
+        run: |
+          dart analyze --format=machine > analyze.txt 2>&1 || true
+          sed "s#${GITHUB_WORKSPACE}/##" analyze.txt | awk -F'|' 'NF>=8 {lvl=($1=="ERROR")?"error":(($1=="WARNING")?"warning":"notice"); printf "::%s file=%s,line=%s,col=%s::%s: %s\n", lvl, $4, $5, $6, $3, $8}'
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Test
+        run: |
+          set -o pipefail
+          flutter test 2>&1 | tee test.txt || { echo "::error::$(tail -40 test.txt | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"; exit 1; }
 
   windows:
     name: Windows installer
@@ -64,7 +71,12 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           flutter pub get
-          flutter build windows --release --dart-define=SUPABASE_URL=$env:SUPABASE_URL --dart-define=SUPABASE_ANON_KEY=$env:SUPABASE_ANON_KEY
+          flutter build windows --release --dart-define=SUPABASE_URL=$env:SUPABASE_URL --dart-define=SUPABASE_ANON_KEY=$env:SUPABASE_ANON_KEY 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content build.log -Tail 45) -join '%0A'
+            Write-Output "::error title=Windows build failed::$tail"
+            exit 1
+          }
 
       - name: Add Visual C++ runtime next to the app
         shell: pwsh

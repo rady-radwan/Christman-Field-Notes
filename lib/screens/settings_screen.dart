@@ -7,7 +7,7 @@ import '../widgets/common.dart';
 import 'admin_screen.dart';
 import 'sign_in_screen.dart';
 
-const appVersion = '0.5.1';
+const appVersion = '0.6.0';
 
 Future<void> showServerSettings(BuildContext context) async {
   final state = context.read<AppState>();

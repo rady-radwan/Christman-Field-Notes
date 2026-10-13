@@ -31,14 +31,25 @@ The script creates:
   - only the issuer or an admin can change status or priority
   - only an admin can deactivate a note
 
-## 3. Sign-up settings
+## 3. Sign-in by email code
 
-Open **Authentication > Sign In / Providers > Email**:
+People sign in by typing their email and then a code that arrives by email. Nobody needs a password.
 
-- Leave **Enable email provider** on.
-- Turn **Confirm email** *off*. Admins already approve every account in the app, so email
-  confirmation is not needed. If you keep it on, people must click a link in an email before
-  their first sign-in.
+1. **Send a code instead of a link.** Open **Authentication > Emails** and pick the **Magic Link**
+   template. Replace its body with this, then click **Save**:
+   ```html
+   <h2>Your Field Notes sign-in code</h2>
+   <p>Enter this code in the app: <strong>{{ .Token }}</strong></p>
+   <p>It expires in one hour. If you did not ask for it, ignore this email.</p>
+   ```
+   Do the same for the **Confirm signup** template.
+2. **Let the server email everyone.** Supabase's built-in mailer only sends to members of your
+   Supabase team, and only a few emails per hour. For the whole project team, connect your own
+   mail service under **Authentication > Emails > SMTP Settings**:
+   - **Option A:** ask Christman IT for an SMTP account (Microsoft 365 can provide one).
+   - **Option B:** use a free sending service such as Brevo, Resend or SendGrid.
+
+   After that, raise the hourly limit under **Authentication > Rate Limits** if needed.
 
 ## 4. Connect the app
 
@@ -60,8 +71,8 @@ You can connect the app in one of two ways:
 
 ## 5. First sign-in
 
-1. Open the app and choose **Request access**.
-2. Enter your name, work email and a password.
+1. Open the app, click **Sign in**, enter your work email and click **Email me a sign-in code**.
+2. Type the code from the email, then your name.
 3. **The first account on a new server automatically becomes the admin.**
 4. Create the first project (for example *Newcastle Medical Center*).
 5. When teammates request access, they appear under **Admin > People**. Approve them and add

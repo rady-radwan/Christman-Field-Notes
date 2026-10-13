@@ -53,7 +53,7 @@ class SupabaseRepo extends Repo {
     try {
       return await run();
     } on AuthException catch (e) {
-      throw RepoException(e.message);
+      throw RepoException(_friendlyAuth(e.message));
     } on PostgrestException catch (e) {
       throw RepoException(_friendly(e.message));
     } on StorageException catch (e) {
@@ -63,6 +63,20 @@ class SupabaseRepo extends Repo {
     } catch (e) {
       throw RepoException('Could not reach the server. Check the internet connection and try again.');
     }
+  }
+
+  String _friendlyAuth(String m) {
+    final l = m.toLowerCase();
+    if (l.contains('not authorized')) {
+      return "This email can't receive sign-in codes yet. The admin needs to finish the email setup on the server.";
+    }
+    if (l.contains('rate limit') || l.contains('security purposes')) {
+      return 'Too many codes were requested. Please wait a few minutes and try again.';
+    }
+    if (l.contains('expired') || l.contains('invalid')) {
+      return 'That code is wrong or has expired. Check the newest email, or send a new code.';
+    }
+    return m;
   }
 
   String _friendly(String m) {
@@ -113,6 +127,46 @@ class SupabaseRepo extends Repo {
         if (me == null) throw RepoException('Account created, but the profile is not ready yet. Try signing in.');
         _listen();
         return me;
+      });
+
+  @override
+  bool get usesEmailCodes => true;
+
+  @override
+  Future<void> sendCode(String email) => _guard(() async {
+        await _db.auth.signInWithOtp(email: email.trim().toLowerCase(), shouldCreateUser: true);
+      });
+
+  @override
+  Future<AppUser> verifyCode(String email, String code) => _guard(() async {
+        final res = await _db.auth.verifyOTP(
+          email: email.trim().toLowerCase(),
+          token: code.replaceAll(RegExp(r'\s'), ''),
+          type: OtpType.email,
+        );
+        final id = res.user?.id ?? _db.auth.currentUser?.id;
+        if (id == null) throw RepoException('That code did not work. Please send a new one.');
+        var me = await _profile(id);
+        if (me == null) {
+          // The profile is created by a database trigger; give it a moment.
+          await Future<void>.delayed(const Duration(seconds: 1));
+          me = await _profile(id);
+        }
+        if (me == null) {
+          throw RepoException('Signed in, but your profile was not found. Ask the admin to check the server setup.');
+        }
+        if (me.status == MemberStatus.removed) {
+          await _db.auth.signOut();
+          throw RepoException('This account was removed by an admin.');
+        }
+        _listen();
+        return me;
+      });
+
+  @override
+  Future<AppUser> updateMyName(String name) => _guard(() async {
+        final row = await _db.from('profiles').update({'name': name.trim()}).eq('id', _myId()).select().single();
+        return AppUser.fromJson(row);
       });
 
   @override

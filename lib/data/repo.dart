@@ -32,6 +32,19 @@ abstract class Repo {
   Future<void> signOut();
   Future<AppUser?> refreshMe();
 
+  /// True when people sign in with a one-time code sent to their email.
+  bool get usesEmailCodes => false;
+
+  /// Emails a one-time sign-in code. Creates the account on first use.
+  Future<void> sendCode(String email) async => throw RepoException('Email codes need the shared server.');
+
+  /// Checks the emailed code and signs in.
+  Future<AppUser> verifyCode(String email, String code) async =>
+      throw RepoException('Email codes need the shared server.');
+
+  /// Lets people set their own display name.
+  Future<AppUser> updateMyName(String name);
+
   /// Everyone the current user may see. Admins also see pending requests.
   Future<List<AppUser>> users();
 

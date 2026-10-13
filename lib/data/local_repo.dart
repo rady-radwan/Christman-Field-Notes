@@ -148,6 +148,15 @@ class LocalRepo extends Repo {
   Future<AppUser?> refreshMe() async => _me;
 
   @override
+  Future<AppUser> updateMyName(String name) async {
+    final me = _requireMe();
+    final updated = me.copyWith(name: name.trim());
+    _users = [for (final u in _users) u.id == me.id ? updated : u];
+    await _save();
+    return updated;
+  }
+
+  @override
   Future<List<AppUser>> users() async {
     final me = _me;
     if (me != null && me.isAdmin) return List.of(_users);

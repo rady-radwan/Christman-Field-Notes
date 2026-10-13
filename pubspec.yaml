@@ -1,7 +1,7 @@
 name: christman_field_notes
 description: Christman Field Notes - field issue notes with marked-up photos.
 publish_to: 'none'
-version: 0.3.0+3
+version: 0.4.0+4
 
 environment:
   sdk: '>=3.5.0 <4.0.0'

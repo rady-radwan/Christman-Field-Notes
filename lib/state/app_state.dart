@@ -124,6 +124,29 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool get usesEmailCodes => repo.usesEmailCodes;
+
+  Future<void> sendCode(String email) => repo.sendCode(email);
+
+  Future<void> verifyCode(String email, String code) async {
+    me = await repo.verifyCode(email, code);
+    await _afterSignIn();
+    notifyListeners();
+  }
+
+  /// New accounts start with the part of the email before "@" as their name.
+  bool get needsName {
+    final m = me;
+    if (m == null) return false;
+    return m.name.trim().isEmpty || m.name.trim().toLowerCase() == m.email.split('@').first.toLowerCase();
+  }
+
+  Future<void> updateMyName(String name) async {
+    me = await repo.updateMyName(name);
+    notifyListeners();
+    await reload(quiet: true);
+  }
+
   Future<void> signOut() async {
     await repo.signOut();
     me = null;

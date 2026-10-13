@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../data/repo.dart';
 import '../models.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
@@ -34,40 +37,49 @@ class SignInScreen extends StatefulWidget {
   State<SignInScreen> createState() => _SignInScreenState();
 }
 
+enum _Step { email, code, name }
+
 class _SignInScreenState extends State<SignInScreen> {
   final _name = TextEditingController();
   final _email = TextEditingController();
-  final _password = TextEditingController();
-  bool _register = false;
+  final _code = TextEditingController();
+  _Step _step = _Step.email;
   bool _busy = false;
   String? _error;
+  int _cooldown = 0;
+  Timer? _timer;
+  bool _localRegister = false; // only used without a shared server
 
   @override
   void dispose() {
+    _timer?.cancel();
     _name.dispose();
     _email.dispose();
-    _password.dispose();
+    _code.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
+  void _startCooldown() {
+    _timer?.cancel();
+    setState(() => _cooldown = 60);
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted || _cooldown <= 1) {
+        t.cancel();
+        if (mounted) setState(() => _cooldown = 0);
+        return;
+      }
+      setState(() => _cooldown--);
+    });
+  }
+
+  Future<void> _run(Future<void> Function(AppState state) action) async {
     final state = context.read<AppState>();
-    final server = state.repo.isServer;
-    final email = _email.text.trim();
-    if (!email.contains('@')) return setState(() => _error = 'Enter your work email.');
-    if (_register && _name.text.trim().isEmpty) return setState(() => _error = 'Enter your name.');
-    if (server && _password.text.length < 8) return setState(() => _error = 'The password needs at least 8 characters.');
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      if (_register) {
-        await state.register(_name.text, email, _password.text);
-      } else {
-        await state.signIn(email, _password.text);
-      }
-      if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+      await action(state);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -75,11 +87,183 @@ class _SignInScreenState extends State<SignInScreen> {
     }
   }
 
+  void _finish() {
+    if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+  }
+
+  String get _emailText => _email.text.trim();
+
+  Future<void> _sendCode() => _run((state) async {
+        if (!_emailText.contains('@') || !_emailText.contains('.')) throw RepoException('Enter your work email.');
+        await state.sendCode(_emailText);
+        if (!mounted) return;
+        setState(() {
+          _step = _Step.code;
+          _code.clear();
+        });
+        _startCooldown();
+      });
+
+  Future<void> _verify() => _run((state) async {
+        final code = _code.text.replaceAll(RegExp(r'\s'), '');
+        if (code.length < 6) throw RepoException('Enter the code from the email.');
+        await state.verifyCode(_emailText, code);
+        if (!mounted) return;
+        if (state.needsName) {
+          setState(() => _step = _Step.name);
+        } else {
+          _finish();
+        }
+      });
+
+  Future<void> _saveName() => _run((state) async {
+        if (_name.text.trim().isEmpty) throw RepoException('Enter your name.');
+        await state.updateMyName(_name.text);
+        _finish();
+      });
+
+  /// Without a shared server there is no email: name + email on this computer only.
+  Future<void> _localSubmit() => _run((state) async {
+        if (!_emailText.contains('@')) throw RepoException('Enter your work email.');
+        if (_localRegister) {
+          if (_name.text.trim().isEmpty) throw RepoException('Enter your name.');
+          await state.register(_name.text, _emailText, '');
+        } else {
+          await state.signIn(_emailText, '');
+        }
+        _finish();
+      });
+
+  Widget _button(String label, VoidCallback onTap) => FilledButton(
+        onPressed: _busy ? null : onTap,
+        child: _busy
+            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+            : Text(label),
+      );
+
+  List<Widget> _emailStep(FnColors c) => [
+        const _Label('Work email'),
+        TextField(
+          controller: _email,
+          autofocus: true,
+          keyboardType: TextInputType.emailAddress,
+          autofillHints: const [AutofillHints.email],
+          decoration: const InputDecoration(hintText: 'name@company.com'),
+          onSubmitted: (_) => _sendCode(),
+        ),
+        const SizedBox(height: 16),
+        _button('Email me a sign-in code', _sendCode),
+        const SizedBox(height: 16),
+        Text(
+          'No password needed. We email you a short code; type it here and you are in. '
+          'First time? The same code creates your account, and an admin approves it.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 13, color: c.muted, height: 1.4),
+        ),
+      ];
+
+  List<Widget> _codeStep(FnColors c) => [
+        Text.rich(
+          TextSpan(style: TextStyle(fontSize: 15, color: c.muted, height: 1.4), children: [
+            const TextSpan(text: 'We sent a sign-in code to\n'),
+            TextSpan(text: _emailText, style: TextStyle(color: c.ink, fontWeight: FontWeight.w700)),
+          ]),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 6),
+        Text('It can take a minute. Check your junk folder too.',
+            textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: c.muted)),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _code,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          autofillHints: const [AutofillHints.oneTimeCode],
+          textAlign: TextAlign.center,
+          maxLength: 10,
+          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, letterSpacing: 8),
+          decoration: const InputDecoration(hintText: '••••••', counterText: ''),
+          onSubmitted: (_) => _verify(),
+        ),
+        const SizedBox(height: 14),
+        _button('Sign in', _verify),
+        const SizedBox(height: 8),
+        Wrap(alignment: WrapAlignment.center, children: [
+          TextButton(
+            onPressed: _busy || _cooldown > 0 ? null : _sendCode,
+            child: Text(_cooldown > 0 ? 'Send a new code (${_cooldown}s)' : 'Send a new code'),
+          ),
+          TextButton(
+            onPressed: _busy
+                ? null
+                : () => setState(() {
+                      _step = _Step.email;
+                      _error = null;
+                    }),
+            child: const Text('Use a different email'),
+          ),
+        ]),
+      ];
+
+  List<Widget> _nameStep(FnColors c) => [
+        Text('Welcome! What is your name?', textAlign: TextAlign.center, style: condensed(24)),
+        const SizedBox(height: 6),
+        Text('This is how the team will see you on notes and replies.',
+            textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: c.muted)),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _name,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          autofillHints: const [AutofillHints.name],
+          decoration: const InputDecoration(hintText: 'First and last name'),
+          onSubmitted: (_) => _saveName(),
+        ),
+        const SizedBox(height: 14),
+        _button('Continue', _saveName),
+      ];
+
+  List<Widget> _localStep(FnColors c) => [
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: c.surface2,
+            border: Border.all(color: c.line),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            'No shared server connected. Notes are saved on this computer only. '
+            'The first account created here becomes the admin.',
+            style: TextStyle(fontSize: 13, color: c.muted, height: 1.35),
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (_localRegister) ...[
+          const _Label('Your name'),
+          TextField(controller: _name, textCapitalization: TextCapitalization.words),
+          const SizedBox(height: 12),
+        ],
+        const _Label('Work email'),
+        TextField(controller: _email, keyboardType: TextInputType.emailAddress, onSubmitted: (_) => _localSubmit()),
+        const SizedBox(height: 16),
+        _button(_localRegister ? 'Create account' : 'Sign in', _localSubmit),
+        TextButton(
+          onPressed: () => setState(() => _localRegister = !_localRegister),
+          child: Text(_localRegister ? 'I already have an account' : 'Create an account'),
+        ),
+      ];
+
   @override
   Widget build(BuildContext context) {
     final c = FnColors.of(context);
     final state = context.watch<AppState>();
-    final server = state.repo.isServer;
+    final body = !state.usesEmailCodes
+        ? _localStep(c)
+        : switch (_step) {
+            _Step.email => _emailStep(c),
+            _Step.code => _codeStep(c),
+            _Step.name => _nameStep(c),
+          };
     return Scaffold(
       body: SafeArea(
         child: Stack(children: [
@@ -95,82 +279,14 @@ class _SignInScreenState extends State<SignInScreen> {
                     Center(child: Container(width: 48, height: 3, color: c.accent)),
                     const SizedBox(height: 18),
                     Text('Field Notes', textAlign: TextAlign.center, style: condensed(40)),
-                    const SizedBox(height: 8),
-                    Text('Photos, markups and replies for every issue on site.',
-                        textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: c.muted)),
-                    const SizedBox(height: 32),
-                    if (!server) ...[
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: c.surface2,
-                          border: Border.all(color: c.line),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          'No shared server connected yet. Notes are saved on this computer only. '
-                          'The first account created here becomes the admin.',
-                          style: TextStyle(fontSize: 13, color: c.muted, height: 1.35),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                    ],
-                    if (_register) ...[
-                      const _Label('Your name'),
-                      TextField(
-                        controller: _name,
-                        textCapitalization: TextCapitalization.words,
-                        autofillHints: const [AutofillHints.name],
-                        decoration: const InputDecoration(hintText: 'First and last name'),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    const _Label('Work email'),
-                    TextField(
-                      controller: _email,
-                      keyboardType: TextInputType.emailAddress,
-                      autofillHints: const [AutofillHints.email],
-                      decoration: const InputDecoration(hintText: 'Your work email'),
-                      onSubmitted: (_) => server ? null : _submit(),
-                    ),
-                    if (server) ...[
-                      const SizedBox(height: 12),
-                      const _Label('Password'),
-                      TextField(
-                        controller: _password,
-                        obscureText: true,
-                        autofillHints: [_register ? AutofillHints.newPassword : AutofillHints.password],
-                        decoration: InputDecoration(hintText: _register ? 'At least 8 characters' : 'Password'),
-                        onSubmitted: (_) => _submit(),
-                      ),
-                    ],
+                    const SizedBox(height: 28),
+                    ...body,
                     if (_error != null) ...[
                       const SizedBox(height: 12),
-                      Text(_error!, style: TextStyle(color: c.urgentText, fontWeight: FontWeight.w600)),
+                      Text(_error!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: c.urgentText, fontWeight: FontWeight.w600)),
                     ],
-                    const SizedBox(height: 18),
-                    FilledButton(
-                      onPressed: _busy ? null : _submit,
-                      child: _busy
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Text(_register ? 'Request access' : 'Sign in'),
-                    ),
-                    const SizedBox(height: 20),
-                    Center(
-                      child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
-                        Text(_register ? 'Already have an account? ' : 'New to the project? ',
-                            style: TextStyle(color: c.muted)),
-                        TextButton(
-                          onPressed: () => setState(() {
-                            _register = !_register;
-                            _error = null;
-                          }),
-                          child: Text(_register ? 'Sign in' : 'Request access'),
-                        ),
-                      ]),
-                    ),
-                    Text('An admin approves every new account.',
-                        textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: c.muted)),
                   ]),
                 ),
               ),
@@ -277,7 +393,7 @@ Future<bool> requireSignIn(BuildContext context, String action) async {
     context: context,
     builder: (ctx) => AlertDialog(
       title: const Text('Sign in to continue'),
-      content: Text('Anyone can look around. To $action, please sign in or request access.'),
+      content: Text('Anyone can look around. To $action, sign in with your email. We send you a code, no password needed.'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Not now')),
         FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Sign in')),

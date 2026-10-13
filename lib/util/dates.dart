@@ -55,7 +55,7 @@ class DateGroups {
 
   String range(DateGroup g) {
     String fmt(DateTime d) => '${_months[d.month - 1]} ${d.day}';
-    final yesterdayOf = (DateTime d) => d.subtract(const Duration(days: 1));
+    DateTime yesterdayOf(DateTime d) => d.subtract(const Duration(days: 1));
     switch (g) {
       case DateGroup.thisWeek:
         return '${fmt(thisWeekStart)} to ${fmt(today)}';

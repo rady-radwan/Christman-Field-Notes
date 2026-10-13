@@ -20,14 +20,14 @@ Future<void> showServerSettings(BuildContext context) async {
         width: 420,
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(
-            'Paste the Project URL and the anon public key from your Supabase project '
-            '(Project Settings > API). Leave both empty to keep notes on this computer only.',
+            'Paste the Project URL and the publishable key from your Supabase project '
+            '(Project Settings > API Keys). Leave both empty to keep notes on this computer only.',
             style: TextStyle(color: FnColors.of(ctx).muted, height: 1.35),
           ),
           const SizedBox(height: 14),
           TextField(controller: url, decoration: const InputDecoration(labelText: 'Project URL')),
           const SizedBox(height: 10),
-          TextField(controller: key, decoration: const InputDecoration(labelText: 'Anon public key'), maxLines: 2),
+          TextField(controller: key, decoration: const InputDecoration(labelText: 'Publishable key'), maxLines: 2),
         ]),
       ),
       actions: [

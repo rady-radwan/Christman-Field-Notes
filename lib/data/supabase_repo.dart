@@ -24,7 +24,7 @@ class SupabaseRepo extends Repo {
   SupabaseClient get _db => Supabase.instance.client;
 
   static Future<SupabaseRepo> connect(String url, String anonKey) async {
-    await Supabase.initialize(url: url, anonKey: anonKey);
+    await Supabase.initialize(url: url, publishableKey: anonKey);
     return SupabaseRepo._(url);
   }
 

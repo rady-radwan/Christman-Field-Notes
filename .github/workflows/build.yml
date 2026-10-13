@@ -136,10 +136,12 @@ jobs:
           flutter pub get
           v=$(grep -E '^version:' pubspec.yaml | sed -E 's/version:[[:space:]]*([0-9.]+).*/\1/')
           echo "VERSION=$v" >> "$GITHUB_ENV"
-          flutter build apk --release --dart-define=SUPABASE_URL=$SUPABASE_URL --dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY 2>&1 | tee build.log || {
+          flutter build apk --release --split-per-abi --dart-define=SUPABASE_URL=$SUPABASE_URL --dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY 2>&1 | tee build.log || {
             echo "::error title=Android build failed::$(tail -60 build.log | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"; exit 1; }
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk "dist/ChristmanFieldNotes-$v.apk"
+          # Modern phones (64-bit) and older 32-bit phones get separate, smaller files.
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "dist/ChristmanFieldNotes-$v-android.apk"
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "dist/ChristmanFieldNotes-$v-android-older-phones.apk"
 
       - uses: actions/upload-artifact@v4
         with:

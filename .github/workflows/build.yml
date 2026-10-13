@@ -99,6 +99,22 @@ jobs:
           name: ChristmanFieldNotes-Setup-${{ steps.ver.outputs.version }}
           path: dist/*.exe
 
+      # Keeps the newest installer on the "installer" branch (one commit, replaced each build)
+      # so it can be fetched with plain git as well as from Artifacts/Releases.
+      - name: Save latest installer to the installer branch
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist/*.exe | Select-Object -First 1
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP/inst" | Out-Null
+          Set-Location "$env:RUNNER_TEMP/inst"
+          git init -q -b installer
+          Copy-Item $exe.FullName .
+          "Latest Windows installer built from main at ${{ github.sha }}." | Set-Content README.md
+          git add -A
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -q -m "Installer ${{ steps.ver.outputs.version }} from ${{ github.sha }}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" installer
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2

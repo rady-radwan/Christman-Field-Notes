@@ -23,6 +23,13 @@ jobs:
           channel: stable
           cache: true
       - run: flutter --version
+      - name: Report server connection (no secrets shown)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -n "$SUPABASE_URL" ]; then host=$(echo "$SUPABASE_URL" | sed -E 's#^https?://##; s#/.*$##'); echo "::notice title=Server URL::set, host ${host}"; else echo "::notice title=Server URL::NOT set"; fi
+          if [ -n "$SUPABASE_ANON_KEY" ]; then echo "::notice title=Server key::set, starts with ${SUPABASE_ANON_KEY:0:15}..."; else echo "::notice title=Server key::NOT set"; fi
       - run: flutter pub get
       - name: Analyze
         run: |

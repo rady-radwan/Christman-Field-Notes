@@ -238,6 +238,18 @@ create policy photos_delete on storage.objects for delete to authenticated
 revoke select on public.profiles from anon;
 grant select (id, name, is_admin, status, created_at) on public.profiles to anon;
 
+-- Accounts created before this script ran have no profile yet: create them,
+-- approved, with the earliest one as admin (only if there is no admin yet).
+insert into public.profiles (id, name, email, is_admin, status)
+select u.id,
+       coalesce(u.raw_user_meta_data ->> 'name', split_part(u.email, '@', 1)),
+       lower(u.email),
+       (row_number() over (order by u.created_at) = 1) and not exists (select 1 from public.profiles where is_admin),
+       'approved'
+from auth.users u
+where not exists (select 1 from public.profiles p where p.id = u.id)
+on conflict (id) do nothing;
+
 -- =====================================================================
 -- Live updates: tell the app when something changes.
 -- =====================================================================

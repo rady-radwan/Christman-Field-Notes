@@ -32,6 +32,7 @@ Windows may show a SmartScreen warning because the installer isn't code-signed y
 
 ### Rules
 
+- **Anyone can look around without signing in**, including notes, photos and replies. Adding or changing anything asks them to sign in.
 - Anyone approved can create a note. A new note starts as **Active**.
 - Only the admin or the issuer can change a note's **status** or **priority**.
 - Only an admin can **deactivate** a note. It stays visible but grayed out.

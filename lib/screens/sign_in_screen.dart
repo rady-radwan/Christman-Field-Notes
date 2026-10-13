@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -66,6 +67,7 @@ class _SignInScreenState extends State<SignInScreen> {
       } else {
         await state.signIn(email, _password.text);
       }
+      if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -174,6 +176,18 @@ class _SignInScreenState extends State<SignInScreen> {
               ),
             ),
           ),
+          if (Navigator.of(context).canPop())
+            Positioned(
+              top: 8,
+              left: 8,
+              child: IconButton(
+                tooltip: 'Close',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close),
+                color: c.ink,
+                style: IconButton.styleFrom(minimumSize: const Size(44, 44)),
+              ),
+            ),
           Positioned(
             top: 8,
             right: 8,
@@ -241,6 +255,79 @@ class PendingScreen extends StatelessWidget {
             ]),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Opens the sign-in screen.
+Future<void> openSignIn(BuildContext context) =>
+    Navigator.of(context).push(MaterialPageRoute(fullscreenDialog: true, builder: (_) => const SignInScreen()));
+
+/// Call before any action that changes data. Returns true when the user may go ahead.
+/// Guests are asked to sign in; people waiting for approval are told so.
+Future<bool> requireSignIn(BuildContext context, String action) async {
+  final state = context.read<AppState>();
+  if (state.canContribute) return true;
+  if (state.isPending) {
+    showInfo(context, 'Your account is waiting for admin approval. You can look around until then.');
+    return false;
+  }
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Sign in to continue'),
+      content: Text('Anyone can look around. To $action, please sign in or request access.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Not now')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Sign in')),
+      ],
+    ),
+  );
+  if (go != true || !context.mounted) return false;
+  await openSignIn(context);
+  if (!context.mounted) return false;
+  final after = context.read<AppState>();
+  if (after.isPending) {
+    showInfo(context, 'Thanks! An admin needs to approve your account before you can add things.');
+    return false;
+  }
+  return after.canContribute;
+}
+
+/// Header button for guests.
+class SignInButton extends StatelessWidget {
+  const SignInButton({super.key});
+  @override
+  Widget build(BuildContext context) => FilledButton.icon(
+        onPressed: () => openSignIn(context),
+        style: FilledButton.styleFrom(minimumSize: const Size(64, 40), shape: const StadiumBorder()),
+        icon: const Icon(Icons.login, size: 18),
+        label: const Text('Sign in'),
+      );
+}
+
+/// Shown at the top when signed in but not yet approved.
+class PendingBanner extends StatelessWidget {
+  const PendingBanner({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+    if (!state.isPending) return const SizedBox.shrink();
+    final c = FnColors.of(context);
+    return Material(
+      color: c.statusBg(NoteStatus.suspended),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(children: [
+          Icon(Icons.hourglass_top_rounded, size: 18, color: c.statusFg(NoteStatus.suspended)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Your account is waiting for admin approval. You can look around until then.',
+                style: TextStyle(color: c.statusFg(NoteStatus.suspended), fontWeight: FontWeight.w600)),
+          ),
+          TextButton(onPressed: () => state.reload(quiet: true), child: const Text('Check again')),
+        ]),
       ),
     );
   }

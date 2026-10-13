@@ -155,18 +155,22 @@ alter table public.project_members enable row level security;
 alter table public.notes           enable row level security;
 alter table public.replies         enable row level security;
 
--- profiles
+-- READ ACCESS: anyone can look around without signing in (guests use the "anon" role).
+-- Adding or changing anything still needs an approved account (policies further down).
+
+-- profiles: everyone sees approved people's names; admins also see pending requests.
+-- Guests cannot read email addresses (column grants at the end of this file).
 drop policy if exists profiles_select on public.profiles;
-create policy profiles_select on public.profiles for select to authenticated
-  using (id = auth.uid() or public.is_approved());
+create policy profiles_select on public.profiles for select to anon, authenticated
+  using (status = 'approved' or id = auth.uid() or public.is_admin());
 drop policy if exists profiles_update on public.profiles;
 create policy profiles_update on public.profiles for update to authenticated
   using (public.is_admin() or id = auth.uid());
 
 -- projects
 drop policy if exists projects_select on public.projects;
-create policy projects_select on public.projects for select to authenticated
-  using (public.is_member(id));
+create policy projects_select on public.projects for select to anon, authenticated
+  using (true);
 drop policy if exists projects_admin on public.projects;
 create policy projects_admin on public.projects for all to authenticated
   using (public.is_admin()) with check (public.is_admin());
@@ -181,8 +185,8 @@ create policy members_admin on public.project_members for all to authenticated
 
 -- notes
 drop policy if exists notes_select on public.notes;
-create policy notes_select on public.notes for select to authenticated
-  using (public.is_member(project_id));
+create policy notes_select on public.notes for select to anon, authenticated
+  using (true);
 drop policy if exists notes_insert on public.notes;
 create policy notes_insert on public.notes for insert to authenticated
   with check (public.is_member(project_id) and issuer_id = auth.uid() and status = 'active');
@@ -198,8 +202,8 @@ create policy notes_delete on public.notes for delete to authenticated
 
 -- replies
 drop policy if exists replies_select on public.replies;
-create policy replies_select on public.replies for select to authenticated
-  using (public.can_see_note(note_id));
+create policy replies_select on public.replies for select to anon, authenticated
+  using (true);
 drop policy if exists replies_insert on public.replies;
 create policy replies_insert on public.replies for insert to authenticated
   with check (public.can_see_note(note_id) and author_id = auth.uid());
@@ -219,8 +223,8 @@ values ('photos', 'photos', false)
 on conflict (id) do nothing;
 
 drop policy if exists photos_read on storage.objects;
-create policy photos_read on storage.objects for select to authenticated
-  using (bucket_id = 'photos' and public.is_member(((storage.foldername(name))[1])::uuid));
+create policy photos_read on storage.objects for select to anon, authenticated
+  using (bucket_id = 'photos');
 
 drop policy if exists photos_write on storage.objects;
 create policy photos_write on storage.objects for insert to authenticated
@@ -229,6 +233,10 @@ create policy photos_write on storage.objects for insert to authenticated
 drop policy if exists photos_delete on storage.objects;
 create policy photos_delete on storage.objects for delete to authenticated
   using (bucket_id = 'photos' and public.is_admin());
+
+-- Guests may read names, never email addresses.
+revoke select on public.profiles from anon;
+grant select (id, name, is_admin, status, created_at) on public.profiles to anon;
 
 -- =====================================================================
 -- Live updates: tell the app when something changes.

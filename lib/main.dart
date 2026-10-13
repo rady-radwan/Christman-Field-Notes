@@ -5,7 +5,6 @@ import 'data/local_repo.dart';
 import 'data/repo.dart';
 import 'data/supabase_repo.dart';
 import 'screens/home_screen.dart';
-import 'screens/sign_in_screen.dart';
 import 'state/app_state.dart';
 import 'state/settings.dart';
 import 'theme.dart';
@@ -58,9 +57,7 @@ class _Root extends StatelessWidget {
     if (state.booting) {
       return const Scaffold(body: Center(child: BrandLogo(full: true, height: 44)));
     }
-    final me = state.me;
-    if (me == null) return const SignInScreen();
-    if (!me.isApproved) return const PendingScreen();
+    // Everyone lands on the notes. Signing in is only needed to add or change things.
     return const HomeScreen();
   }
 }

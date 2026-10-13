@@ -5,8 +5,9 @@ import '../state/app_state.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'admin_screen.dart';
+import 'sign_in_screen.dart';
 
-const appVersion = '0.2.0';
+const appVersion = '0.3.0';
 
 Future<void> showServerSettings(BuildContext context) async {
   final state = context.read<AppState>();
@@ -89,13 +90,27 @@ class SettingsScreen extends StatelessWidget {
             card([
               const SectionLabel('Account'),
               const SizedBox(height: 10),
+              if (state.isGuest)
+                Row(children: [
+                  Expanded(
+                    child: Text('You are looking around as a guest. Sign in to add notes and replies.',
+                        style: TextStyle(color: c.muted)),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton(
+                    onPressed: () => openSignIn(context),
+                    child: const Text('Sign in'),
+                  ),
+                ])
+              else
               Row(children: [
                 Avatar(name: state.me?.name ?? '?', size: 40),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(state.me?.name ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                    Text('${state.me?.email ?? ''}${state.isAdmin ? ' · Admin' : ''}', style: TextStyle(color: c.muted)),
+                    Text('${state.me?.email ?? ''}${state.isAdmin ? ' · Admin' : ''}${state.isPending ? ' · Waiting for approval' : ''}',
+                        style: TextStyle(color: c.muted)),
                   ]),
                 ),
                 OutlinedButton(

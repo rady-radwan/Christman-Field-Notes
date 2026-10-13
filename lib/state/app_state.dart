@@ -51,7 +51,9 @@ class AppState extends ChangeNotifier {
     });
     try {
       me = await repo.restoreSession();
-      if (me != null) await _afterSignIn();
+      if (me != null) _seen = settings.seen(me!.id);
+      // Everyone can look around, signed in or not.
+      await reload(quiet: true);
     } on RepoException catch (e) {
       connectionError = e.message;
     }
@@ -69,18 +71,22 @@ class AppState extends ChangeNotifier {
 
   Future<void> _afterSignIn() async {
     _seen = settings.seen(me!.id);
-    if (me!.isApproved) await reload();
+    await reload();
   }
+
+  /// Not signed in: can read everything, but not add or change anything.
+  bool get isGuest => me == null;
+
+  /// Signed in but still waiting for an admin.
+  bool get isPending => me != null && !me!.isApproved;
+
+  /// Signed in and approved: may add notes, reply and so on.
+  bool get canContribute => me != null && me!.isApproved;
 
   /// Reloads everything visible to the current user.
   Future<void> reload({bool quiet = false}) async {
-    if (me == null) return;
     try {
-      me = await repo.refreshMe() ?? me;
-      if (!me!.isApproved) {
-        notifyListeners();
-        return;
-      }
+      if (me != null) me = await repo.refreshMe() ?? me;
       users = await repo.users();
       projects = await repo.projects();
       members = await repo.projectMembers();
@@ -121,12 +127,10 @@ class AppState extends ChangeNotifier {
   Future<void> signOut() async {
     await repo.signOut();
     me = null;
-    users = [];
-    projects = [];
-    notes = [];
-    project = null;
+    _seen = {};
     selectedNoteId = null;
     notifyListeners();
+    await reload(quiet: true);
   }
 
   // ---------------------------------------------------------------- settings
@@ -327,6 +331,9 @@ class AppState extends ChangeNotifier {
   // ---------------------------------------------------------------- note actions
 
   Future<T> _run<T>(Future<T> Function() f) async {
+    if (!canContribute) {
+      throw RepoException(isPending ? 'Your account is waiting for admin approval.' : 'Please sign in first.');
+    }
     busy = true;
     notifyListeners();
     try {

@@ -83,11 +83,10 @@ class SupabaseRepo extends Repo {
 
   @override
   Future<AppUser?> restoreSession() => _guard(() async {
+        _listen(); // live updates for guests too
         final u = _db.auth.currentUser;
         if (u == null) return null;
-        final me = await _profile(u.id);
-        if (me != null) _listen();
-        return me;
+        return _profile(u.id);
       });
 
   @override
@@ -118,9 +117,8 @@ class SupabaseRepo extends Repo {
 
   @override
   Future<void> signOut() => _guard(() async {
-        await _channel?.unsubscribe();
-        _channel = null;
         await _db.auth.signOut();
+        _listen(); // keep live updates as a guest
       });
 
   @override
@@ -131,7 +129,9 @@ class SupabaseRepo extends Repo {
 
   @override
   Future<List<AppUser>> users() => _guard(() async {
-        final rows = await _db.from('profiles').select().order('name');
+        // Guests may read names but not email addresses (see column grants in schema.sql).
+        final cols = _db.auth.currentUser == null ? 'id,name,is_admin,status' : '*';
+        final rows = await _db.from('profiles').select(cols).order('name');
         return rows.map(AppUser.fromJson).toList();
       });
 

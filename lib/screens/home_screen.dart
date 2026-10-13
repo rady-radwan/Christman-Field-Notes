@@ -39,6 +39,8 @@ void _openNote(BuildContext context, Note n, {required bool wide}) {
 }
 
 Future<void> _newNote(BuildContext context, {required bool wide}) async {
+  if (!await requireSignIn(context, 'add a note')) return;
+  if (!context.mounted) return;
   final id = await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => const NoteFormScreen()));
   if (id != null && wide && context.mounted) context.read<AppState>().selectNote(id);
 }
@@ -243,12 +245,23 @@ class _PhoneHomeState extends State<_PhoneHome> {
                     icon: Icon(_searching ? Icons.search_off : Icons.search, color: c.ink),
                   ),
                   const ThemeToggleButton(),
-                  const BellButton(wide: false),
-                  IconButton(
-                    tooltip: 'Settings',
-                    onPressed: () => _openSettings(context),
-                    icon: Avatar(name: state.me?.name ?? '?', size: 30),
-                  ),
+                  if (state.isGuest) ...[
+                    IconButton(
+                      tooltip: 'Settings',
+                      onPressed: () => _openSettings(context),
+                      icon: Icon(Icons.settings_outlined, color: c.ink),
+                    ),
+                    const SizedBox(width: 4),
+                    const SignInButton(),
+                    const SizedBox(width: 4),
+                  ] else ...[
+                    const BellButton(wide: false),
+                    IconButton(
+                      tooltip: 'Settings',
+                      onPressed: () => _openSettings(context),
+                      icon: Avatar(name: state.me?.name ?? '?', size: 30),
+                    ),
+                  ],
                 ]),
                 const SizedBox(height: 6),
                 Row(children: [
@@ -276,6 +289,7 @@ class _PhoneHomeState extends State<_PhoneHome> {
           ),
         ),
         const _ConnectionBanner(),
+        const PendingBanner(),
         Expanded(child: body),
       ]),
       floatingActionButton: FloatingActionButton.extended(
@@ -377,6 +391,15 @@ class _DesktopHome extends StatelessWidget {
             const SizedBox(width: 12),
             const ThemeToggleButton(outlined: true),
             const SizedBox(width: 4),
+            if (state.isGuest) ...[
+              IconButton(
+                tooltip: 'Settings',
+                onPressed: () => _openSettings(context),
+                icon: Icon(Icons.settings_outlined, color: c.ink),
+              ),
+              const SizedBox(width: 8),
+              const SignInButton(),
+            ] else ...[
             const BellButton(wide: true),
             const SizedBox(width: 8),
             InkWell(
@@ -391,9 +414,11 @@ class _DesktopHome extends StatelessWidget {
                 ]),
               ),
             ),
+            ],
           ]),
         ),
         const _ConnectionBanner(),
+        const PendingBanner(),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
@@ -496,8 +521,10 @@ class _NoProjectState extends State<_NoProject> {
         actions: [
           const ThemeToggleButton(),
           IconButton(tooltip: 'Settings', onPressed: () => _openSettings(context), icon: const Icon(Icons.settings_outlined)),
+          if (state.isGuest) const Padding(padding: EdgeInsets.only(right: 12, left: 4), child: SignInButton()),
         ],
       ),
+      bottomNavigationBar: const PendingBanner(),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -510,7 +537,10 @@ class _NoProjectState extends State<_NoProject> {
               Text(
                 state.isAdmin
                     ? 'Notes are organized by project. Each project has its own team and categories.'
-                    : 'An admin needs to add you to a project before you can see its notes.',
+                    : state.isGuest
+                        ? 'Nothing has been shared yet. Sign in or request access to get started. '
+                            'The first account on a new server becomes the admin.'
+                        : 'An admin needs to create a project first.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: c.muted, height: 1.4),
               ),
@@ -538,7 +568,13 @@ class _NoProjectState extends State<_NoProject> {
                         },
                   child: const Text('Create project'),
                 ),
-              ] else
+              ] else if (state.isGuest)
+                FilledButton.icon(
+                  onPressed: () => openSignIn(context),
+                  icon: const Icon(Icons.login),
+                  label: const Text('Sign in or request access'),
+                )
+              else
                 FilledButton.icon(
                   onPressed: () => state.reload(quiet: true),
                   icon: const Icon(Icons.refresh),

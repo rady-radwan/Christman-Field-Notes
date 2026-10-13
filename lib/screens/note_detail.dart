@@ -10,6 +10,7 @@ import '../util/dates.dart';
 import '../widgets/common.dart';
 import '../widgets/photo_picker.dart';
 import 'note_form_screen.dart';
+import 'sign_in_screen.dart';
 
 /// Full-screen page used on phones and narrow windows.
 class NoteDetailScreen extends StatelessWidget {
@@ -247,6 +248,9 @@ class _NoteDetailViewState extends State<NoteDetailView> {
 
     return Column(children: [
       Expanded(child: content),
+      if (!state.canContribute)
+        _JoinBar(pending: state.isPending)
+      else
       _Composer(
         controller: _reply,
         photos: _replyPhotos,
@@ -591,6 +595,35 @@ class _Composer extends StatelessWidget {
                   : const Icon(Icons.send_rounded),
             ),
           ]),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Replaces the reply box for guests and people waiting for approval.
+class _JoinBar extends StatelessWidget {
+  const _JoinBar({required this.pending});
+  final bool pending;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = FnColors.of(context);
+    return Container(
+      decoration: BoxDecoration(color: c.surface, border: Border(top: BorderSide(color: c.line))),
+      padding: const EdgeInsets.fromLTRB(16, 10, 12, 12),
+      child: SafeArea(
+        top: false,
+        child: Row(children: [
+          Icon(pending ? Icons.hourglass_top_rounded : Icons.lock_outline, size: 18, color: c.muted),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              pending ? 'You can reply once an admin approves your account.' : 'Sign in to reply or add photos.',
+              style: TextStyle(color: c.muted),
+            ),
+          ),
+          if (!pending) const SignInButton(),
         ]),
       ),
     );

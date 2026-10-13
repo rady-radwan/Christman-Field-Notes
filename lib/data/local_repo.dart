@@ -151,7 +151,9 @@ class LocalRepo extends Repo {
   Future<List<AppUser>> users() async {
     final me = _me;
     if (me != null && me.isAdmin) return List.of(_users);
-    return _users.where((u) => u.isApproved).toList();
+    final visible = _users.where((u) => u.isApproved || u.id == me?.id);
+    // Guests see names only, not email addresses.
+    return me == null ? visible.map((u) => AppUser(id: u.id, name: u.name, email: '', isAdmin: u.isAdmin, status: u.status)).toList() : visible.toList();
   }
 
   @override
@@ -163,11 +165,7 @@ class LocalRepo extends Repo {
   }
 
   @override
-  Future<List<Project>> projects() async {
-    final me = _requireMe();
-    if (me.isAdmin) return List.of(_projects);
-    return _projects.where((pr) => (_members[pr.id] ?? {}).contains(me.id)).toList();
-  }
+  Future<List<Project>> projects() async => List.of(_projects); // everyone can read
 
   @override
   Future<Project> createProject(String name) async {

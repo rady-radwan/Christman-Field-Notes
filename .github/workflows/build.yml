@@ -1,0 +1,93 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter --version
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter test
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Create Windows platform files
+        shell: pwsh
+        run: |
+          flutter create --platforms=windows --org com.christman --project-name christman_field_notes .
+          Copy-Item assets/icon/app_icon.ico windows/runner/resources/app_icon.ico -Force
+          (Get-Content windows/runner/main.cpp) `
+            -replace 'L"christman_field_notes"', 'L"Christman Field Notes"' `
+            -replace 'Win32Window::Size size\(1280, 720\)', 'Win32Window::Size size(1440, 900)' |
+            Set-Content windows/runner/main.cpp
+          (Get-Content windows/runner/Runner.rc) `
+            -replace '"christman_field_notes"', '"Christman Field Notes"' `
+            -replace '"com.christman"', '"The Christman Company"' |
+            Set-Content windows/runner/Runner.rc
+
+      - name: Work out version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF -like 'refs/tags/v*') { $v = $env:GITHUB_REF_NAME.Substring(1) }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        shell: pwsh
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          flutter pub get
+          flutter build windows --release --dart-define=SUPABASE_URL=$env:SUPABASE_URL --dart-define=SUPABASE_ANON_KEY=$env:SUPABASE_ANON_KEY
+
+      - name: Add Visual C++ runtime next to the app
+        shell: pwsh
+        run: |
+          foreach ($f in 'msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll') {
+            Copy-Item "C:\Windows\System32\$f" build/windows/x64/runner/Release/ -Force
+          }
+
+      - name: Make installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" installer/field_notes.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChristmanFieldNotes-Setup-${{ steps.ver.outputs.version }}
+          path: dist/*.exe
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          name: Christman Field Notes ${{ steps.ver.outputs.version }}

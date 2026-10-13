@@ -114,7 +114,9 @@ create trigger on_auth_user_created after insert on auth.users
 create or replace function public.guard_profile_update() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if not public.is_admin() and (new.is_admin is distinct from old.is_admin or new.status is distinct from old.status
+  -- auth.uid() is null for the Supabase dashboard / server, which may change anything.
+  if auth.uid() is not null and not public.is_admin()
+     and (new.is_admin is distinct from old.is_admin or new.status is distinct from old.status
                                 or new.email is distinct from old.email) then
     raise exception 'Only an admin can change roles or approval.';
   end if;
@@ -133,7 +135,7 @@ begin
   if new.issuer_id <> old.issuer_id or new.project_id <> old.project_id then
     raise exception 'The issuer and project of a note cannot change.';
   end if;
-  if new.status = 'deactivated' and old.status <> 'deactivated' and not public.is_admin() then
+  if new.status = 'deactivated' and old.status <> 'deactivated' and auth.uid() is not null and not public.is_admin() then
     raise exception 'Only an admin can deactivate a note.';
   end if;
   new.updated_at := now();

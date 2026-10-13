@@ -189,7 +189,7 @@ class MarkupEditorScreen extends StatefulWidget {
 
 class _MarkupEditorScreenState extends State<MarkupEditorScreen> {
   static const _bg = Color(0xFF111417);
-  static const _panel = Color(0xFF1B2024);
+  static const _panelColor = Color(0xFF1B2024);
   static const _border = Color(0xFF3B4248);
   static const _copper = Color(0xFFB98052);
   static const _copperLight = Color(0xFFD19A6C);
@@ -652,7 +652,7 @@ class _MarkupEditorScreenState extends State<MarkupEditorScreen> {
                 : 'Drag on the photo to draw. Tap any markup to select it.';
 
     return Container(
-      color: _panel,
+      color: _panelColor,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [

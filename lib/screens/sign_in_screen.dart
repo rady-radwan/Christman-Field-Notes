@@ -49,6 +49,7 @@ class _SignInScreenState extends State<SignInScreen> {
   int _cooldown = 0;
   Timer? _timer;
   bool _localRegister = false; // only used without a shared server
+  bool _linkHandled = false;
 
   @override
   void dispose() {
@@ -171,7 +172,8 @@ class _SignInScreenState extends State<SignInScreen> {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 6),
-        Text('It can take a minute. Check your junk folder too.',
+        Text('Type the code below, or click the link in the email to open Field Notes. '
+            'It can take a minute; check your junk folder too.',
             textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: c.muted)),
         const SizedBox(height: 16),
         TextField(
@@ -257,6 +259,18 @@ class _SignInScreenState extends State<SignInScreen> {
   Widget build(BuildContext context) {
     final c = FnColors.of(context);
     final state = context.watch<AppState>();
+    // Signed in by clicking the emailed link while this screen was open.
+    if (_step == _Step.code && state.me != null && !_linkHandled) {
+      _linkHandled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (state.needsName) {
+          setState(() => _step = _Step.name);
+        } else {
+          _finish();
+        }
+      });
+    }
     final body = !state.usesEmailCodes
         ? _localStep(c)
         : switch (_step) {

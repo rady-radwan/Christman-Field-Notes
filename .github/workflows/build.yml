@@ -64,6 +64,7 @@ jobs:
             -replace '"christman_field_notes"', '"Christman Field Notes"' `
             -replace '"com.christman"', '"The Christman Company"' |
             Set-Content windows/runner/Runner.rc
+          python tool/patch_windows_runner.py
 
       - name: Work out version
         id: ver

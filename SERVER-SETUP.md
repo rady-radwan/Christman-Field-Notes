@@ -40,10 +40,18 @@ People sign in by typing their email and then a code that arrives by email. Nobo
    ```html
    <h2>Your Field Notes sign-in code</h2>
    <p>Enter this code in the app: <strong>{{ .Token }}</strong></p>
+   <p>Or <a href="{{ .ConfirmationURL }}">click here to open Field Notes</a> on the computer where you asked for the code.</p>
    <p>It expires in one hour. If you did not ask for it, ignore this email.</p>
    ```
    Do the same for the **Confirm signup** template.
-2. **Let the server email everyone.** Supabase's built-in mailer only sends to members of your
+2. **Make the email link open the app.** Open **Authentication > URL Configuration** and:
+   - set **Site URL** to `christman-fieldnotes://login-callback`
+   - under **Redirect URLs**, click **Add URL** and add `christman-fieldnotes://login-callback`
+
+   The Windows installer registers this address, so clicking the link opens Field Notes and signs
+   the person in. Company mail scanners sometimes use up links before people click them; the code
+   always works.
+3. **Let the server email everyone.** Supabase's built-in mailer only sends to members of your
    Supabase team, and only a few emails per hour. For the whole project team, connect your own
    mail service under **Authentication > Emails > SMTP Settings**:
    - **Option A:** ask Christman IT for an SMTP account (Microsoft 365 can provide one).

@@ -11,6 +11,11 @@ import 'repo.dart';
 const _uuid = Uuid();
 const _bucket = 'photos';
 
+/// Clicking the link in the sign-in email opens the app through this address.
+/// The Windows installer registers it; it must also be listed under
+/// Supabase > Authentication > URL Configuration > Redirect URLs.
+const signInRedirect = 'christman-fieldnotes://login-callback';
+
 /// Shared server: every signed-in team member sees the same notes.
 /// Database tables and security rules are in supabase/schema.sql.
 class SupabaseRepo extends Repo {
@@ -18,6 +23,8 @@ class SupabaseRepo extends Repo {
 
   final String _url;
   final _changes = StreamController<void>.broadcast();
+  final _signedIn = StreamController<void>.broadcast();
+  StreamSubscription<AuthState>? _authSub;
   final Map<String, (String, DateTime)> _signedUrls = {};
   RealtimeChannel? _channel;
 
@@ -25,7 +32,12 @@ class SupabaseRepo extends Repo {
 
   static Future<SupabaseRepo> connect(String url, String anonKey) async {
     await Supabase.initialize(url: url, publishableKey: anonKey);
-    return SupabaseRepo._(url);
+    final repo = SupabaseRepo._(url);
+    // Sign-ins that happen outside the sign-in screen (clicking the emailed link).
+    repo._authSub = Supabase.instance.client.auth.onAuthStateChange.listen((s) {
+      if (s.event == AuthChangeEvent.signedIn) repo._signedIn.add(null);
+    }, onError: (_) {});
+    return repo;
   }
 
   @override
@@ -36,6 +48,9 @@ class SupabaseRepo extends Repo {
 
   @override
   Stream<void> get changes => _changes.stream;
+
+  @override
+  Stream<void> get signedIn => _signedIn.stream;
 
   void _listen() {
     _channel?.unsubscribe();
@@ -134,7 +149,11 @@ class SupabaseRepo extends Repo {
 
   @override
   Future<void> sendCode(String email) => _guard(() async {
-        await _db.auth.signInWithOtp(email: email.trim().toLowerCase(), shouldCreateUser: true);
+        await _db.auth.signInWithOtp(
+          email: email.trim().toLowerCase(),
+          shouldCreateUser: true,
+          emailRedirectTo: signInRedirect,
+        );
       });
 
   @override
@@ -345,6 +364,8 @@ class SupabaseRepo extends Repo {
 
   @override
   void dispose() {
+    _authSub?.cancel();
+    _signedIn.close();
     _channel?.unsubscribe();
     _changes.close();
   }

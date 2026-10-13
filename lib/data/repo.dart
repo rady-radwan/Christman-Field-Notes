@@ -25,6 +25,9 @@ abstract class Repo {
   /// Fires when data may have changed somewhere else (another user).
   Stream<void> get changes;
 
+  /// Fires when someone signs in without the sign-in screen (e.g. the emailed link).
+  Stream<void> get signedIn => const Stream.empty();
+
   // ---- Accounts ----
   Future<AppUser?> restoreSession();
   Future<AppUser> signIn({required String email, required String password});

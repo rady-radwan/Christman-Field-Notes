@@ -35,6 +35,13 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Registry]
+; "christman-fieldnotes://" links (the sign-in email) open Field Notes.
+Root: HKA; Subkey: "Software\Classes\christman-fieldnotes"; ValueType: string; ValueName: ""; ValueData: "URL:Christman Field Notes"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\christman-fieldnotes"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\christman-fieldnotes\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"
+Root: HKA; Subkey: "Software\Classes\christman-fieldnotes\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
+
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon

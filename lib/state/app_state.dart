@@ -14,6 +14,7 @@ class AppState extends ChangeNotifier {
   final Repo repo;
   final Settings settings;
   StreamSubscription<void>? _sub;
+  StreamSubscription<void>? _signInSub;
   Timer? _debounce;
 
   bool booting = true;
@@ -49,6 +50,7 @@ class AppState extends ChangeNotifier {
       _debounce?.cancel();
       _debounce = Timer(const Duration(milliseconds: 400), () => reload(quiet: true));
     });
+    _signInSub = repo.signedIn.listen((_) => _onSignedInFromLink());
     try {
       me = await repo.restoreSession();
       if (me != null) _seen = settings.seen(me!.id);
@@ -61,8 +63,24 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The emailed link opened the app and signed the person in.
+  Future<void> _onSignedInFromLink() async {
+    try {
+      final who = await repo.restoreSession();
+      if (who == null) return;
+      final changed = me?.id != who.id;
+      me = who;
+      if (changed) await _afterSignIn();
+      notifyListeners();
+    } on RepoException catch (e) {
+      connectionError = e.message;
+      notifyListeners();
+    }
+  }
+
   @override
   void dispose() {
+    _signInSub?.cancel();
     _sub?.cancel();
     _debounce?.cancel();
     repo.dispose();

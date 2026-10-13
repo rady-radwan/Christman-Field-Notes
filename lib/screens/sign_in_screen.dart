@@ -106,9 +106,15 @@ class _SignInScreenState extends State<SignInScreen> {
       });
 
   Future<void> _verify() => _run((state) async {
-        final code = _code.text.replaceAll(RegExp(r'\s'), '');
-        if (code.length < 6) throw RepoException('Enter the code from the email.');
-        await state.verifyCode(_emailText, code);
+        final input = _code.text.trim();
+        if (input.contains('://')) {
+          // The sign-in link copied from the email.
+          await state.verifyLink(input);
+        } else {
+          final code = input.replaceAll(RegExp(r'\s'), '');
+          if (code.length < 6) throw RepoException('Enter the code from the email, or paste the link.');
+          await state.verifyCode(_emailText, code);
+        }
         if (!mounted) return;
         if (state.needsName) {
           setState(() => _step = _Step.name);
@@ -172,19 +178,18 @@ class _SignInScreenState extends State<SignInScreen> {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 6),
-        Text('Type the code below, or click the link in the email to open Field Notes. '
-            'It can take a minute; check your junk folder too.',
+        Text('Type the code from the email below. If the email only has a link, right-click it, '
+            'choose "Copy link", and paste it below instead. It can take a minute; check your junk folder too.',
             textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: c.muted)),
         const SizedBox(height: 16),
         TextField(
           controller: _code,
           autofocus: true,
-          keyboardType: TextInputType.number,
+          keyboardType: TextInputType.visiblePassword,
           autofillHints: const [AutofillHints.oneTimeCode],
           textAlign: TextAlign.center,
-          maxLength: 10,
-          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, letterSpacing: 8),
-          decoration: const InputDecoration(hintText: '••••••', counterText: ''),
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: 3),
+          decoration: const InputDecoration(hintText: 'Code, or paste the link'),
           onSubmitted: (_) => _verify(),
         ),
         const SizedBox(height: 14),

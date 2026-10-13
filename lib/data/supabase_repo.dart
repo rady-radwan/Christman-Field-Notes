@@ -31,7 +31,12 @@ class SupabaseRepo extends Repo {
   SupabaseClient get _db => Supabase.instance.client;
 
   static Future<SupabaseRepo> connect(String url, String anonKey) async {
-    await Supabase.initialize(url: url, publishableKey: anonKey);
+    await Supabase.initialize(
+      url: url,
+      publishableKey: anonKey,
+      // Implicit flow: the emailed link holds a token the app can check when pasted.
+      authOptions: const FlutterAuthClientOptions(authFlowType: AuthFlowType.implicit),
+    );
     final repo = SupabaseRepo._(url);
     // Sign-ins that happen outside the sign-in screen (clicking the emailed link).
     repo._authSub = Supabase.instance.client.auth.onAuthStateChange.listen((s) {
@@ -96,6 +101,9 @@ class SupabaseRepo extends Repo {
 
   String _friendly(String m) {
     if (m.contains('row-level security')) return 'You do not have permission to do that.';
+    if (m.contains('does not exist') || m.contains('schema cache')) {
+      return 'The server database is not set up yet. The admin needs to run the setup script (schema.sql) in Supabase.';
+    }
     return m;
   }
 
@@ -181,6 +189,57 @@ class SupabaseRepo extends Repo {
         _listen();
         return me;
       });
+
+  /// Signs in from the sign-in link copied out of the email (instead of clicking it).
+  @override
+  Future<AppUser> verifyLink(String pasted) => _guard(() async {
+        final link = _unwrapLink(pasted.trim());
+        final uri = Uri.tryParse(link);
+        final hash = uri?.queryParameters['token'] ?? uri?.queryParameters['token_hash'];
+        if (uri == null || hash == null || hash.isEmpty) {
+          throw RepoException('That does not look like the sign-in link. Copy the whole link from the email.');
+        }
+        final type = switch (uri.queryParameters['type']) {
+          'signup' => OtpType.signup,
+          'invite' => OtpType.invite,
+          'recovery' => OtpType.recovery,
+          'email' => OtpType.email,
+          _ => OtpType.magiclink,
+        };
+        final res = await _db.auth.verifyOTP(tokenHash: hash, type: type);
+        final id = res.user?.id ?? _db.auth.currentUser?.id;
+        if (id == null) throw RepoException('That link did not work. Please send a new code.');
+        return _finishSignIn(id);
+      });
+
+  /// Outlook "Safe Links" wrap the real link; unwrap it.
+  String _unwrapLink(String s) {
+    var link = s;
+    for (var i = 0; i < 3; i++) {
+      final u = Uri.tryParse(link);
+      final inner = u?.queryParameters['url'];
+      if (u == null || inner == null || !u.host.contains('safelinks')) break;
+      link = inner;
+    }
+    return link;
+  }
+
+  Future<AppUser> _finishSignIn(String id) async {
+    var me = await _profile(id);
+    if (me == null) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      me = await _profile(id);
+    }
+    if (me == null) {
+      throw RepoException('Signed in, but your profile was not found. Ask the admin to check the server setup.');
+    }
+    if (me.status == MemberStatus.removed) {
+      await _db.auth.signOut();
+      throw RepoException('This account was removed by an admin.');
+    }
+    _listen();
+    return me;
+  }
 
   @override
   Future<AppUser> updateMyName(String name) => _guard(() async {

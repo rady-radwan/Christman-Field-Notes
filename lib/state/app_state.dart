@@ -152,6 +152,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> verifyLink(String link) async {
+    me = await repo.verifyLink(link);
+    await _afterSignIn();
+    notifyListeners();
+  }
+
   /// New accounts start with the part of the email before "@" as their name.
   bool get needsName {
     final m = me;

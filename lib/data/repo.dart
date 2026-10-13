@@ -45,6 +45,9 @@ abstract class Repo {
   Future<AppUser> verifyCode(String email, String code) async =>
       throw RepoException('Email codes need the shared server.');
 
+  /// Signs in from the link in the sign-in email, pasted into the app.
+  Future<AppUser> verifyLink(String link) async => throw RepoException('Email links need the shared server.');
+
   /// Lets people set their own display name.
   Future<AppUser> updateMyName(String name);
 

@@ -10,7 +10,7 @@ import '../widgets/note_cards.dart';
 
 typedef OpenNote = void Function(Note note);
 
-/// Tab 1: open notes (Active + Suspended), sorted by priority then date.
+/// Tab 1: open observations (everything not Resolved or Voided), by priority then date.
 class OpenNotesView extends StatelessWidget {
   const OpenNotesView({super.key, required this.onOpen, this.selectedId, this.bottomPadding = 96});
   final OpenNote onOpen;
@@ -28,7 +28,7 @@ class OpenNotesView extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
             decoration: BoxDecoration(
-              color: c.surface,
+              color: c.card,
               border: Border.all(color: c.line),
               borderRadius: BorderRadius.circular(10),
             ),
@@ -45,39 +45,41 @@ class OpenNotesView extends StatelessWidget {
         padding: EdgeInsets.fromLTRB(16, 14, 16, bottomPadding),
         children: [
           Row(children: [
-            stat('Active', state.count((n) => n.status == NoteStatus.active)),
+            stat('🔵 Open', state.count((n) => n.status == NoteStatus.open)),
             const SizedBox(width: 8),
-            stat('Suspended', state.count((n) => n.status == NoteStatus.suspended)),
+            stat('🟡 In progress', state.count((n) => n.status == NoteStatus.inProgress)),
             const SizedBox(width: 8),
-            stat('Urgent', state.count((n) => !n.status.isClosed && n.priority == Priority.urgent), c.urgentText),
+            stat('🟠 To verify', state.count((n) => n.status == NoteStatus.pendingVerification)),
             const SizedBox(width: 8),
-            stat('For me', state.count((n) => !n.status.isClosed && state.isAssignedToMe(n)), c.accentText),
+            stat('🔴 Overdue', state.count((n) => n.isOverdue), c.urgentText),
           ]),
           const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(children: [
-              FnChip(label: 'All', selected: state.openCategories.isEmpty, onTap: () => state.toggleOpenCategory(null)),
-              for (final cat in cats) ...[
-                const SizedBox(width: 8),
-                FnChip(
-                  label: cat,
-                  selected: state.openCategories.contains(cat),
-                  onTap: () => state.toggleOpenCategory(cat),
-                ),
-              ],
-            ]),
-          ),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            FnChip(
+              label: 'All',
+              dense: true,
+              selected: state.openCategories.isEmpty,
+              onTap: () => state.toggleOpenCategory(null),
+            ),
+            for (final cat in cats)
+              FnChip(
+                label: cat,
+                dense: true,
+                selected: state.openCategories.contains(cat),
+                onTap: () => state.toggleOpenCategory(cat),
+              ),
+          ]),
           const SizedBox(height: 10),
           Row(children: [
             Expanded(
               child: Text(
-                '${list.length} open ${list.length == 1 ? 'note' : 'notes'} · by priority, then date',
+                '${list.length} open ${list.length == 1 ? 'observation' : 'observations'} · by priority, then date',
                 style: TextStyle(fontSize: 13, color: c.muted),
               ),
             ),
             FnChip(
               label: 'Assigned to me',
+              dense: true,
               icon: Icons.person_outline,
               selected: state.onlyMine,
               onTap: () => state.setOnlyMine(!state.onlyMine),
@@ -87,8 +89,8 @@ class OpenNotesView extends StatelessWidget {
           if (list.isEmpty)
             _Empty(
               text: state.notes.isEmpty
-                  ? 'No notes yet. Use "New note" to report the first issue.'
-                  : 'No open notes match these filters.',
+                  ? 'No observations yet. Use "New Observation" to report the first one.'
+                  : 'No open observations match these filters.',
             ),
           for (final n in list)
             Padding(
@@ -101,7 +103,7 @@ class OpenNotesView extends StatelessWidget {
   }
 }
 
-/// Tab 2: every note, grouped This week / Past week / Earlier this month / Older.
+/// Tab 2: every observation, grouped This week / Past week / Earlier this month / Older.
 class ByDateView extends StatelessWidget {
   const ByDateView({super.key, required this.onOpen, this.selectedId, this.bottomPadding = 96});
   final OpenNote onOpen;
@@ -122,13 +124,13 @@ class ByDateView extends StatelessWidget {
       child: ListView(
         padding: EdgeInsets.fromLTRB(16, 14, 16, bottomPadding),
         children: [
-          if (byGroup.isEmpty) const _Empty(text: 'No notes yet.'),
+          if (byGroup.isEmpty) const _Empty(text: 'No observations yet.'),
           for (final g in DateGroup.values)
             if (byGroup[g] != null) ...[
               Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
                 Expanded(child: Text(groups.label(g), style: condensed(20))),
                 Text(
-                  '${groups.range(g)} · ${byGroup[g]!.length} ${byGroup[g]!.length == 1 ? 'note' : 'notes'}',
+                  '${groups.range(g)} · ${byGroup[g]!.length} ${byGroup[g]!.length == 1 ? 'observation' : 'observations'}',
                   style: TextStyle(fontSize: 13, color: c.muted),
                 ),
               ]),
@@ -168,22 +170,29 @@ class ByCategoryView extends StatelessWidget {
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 8, children: [
             for (final cat in cats)
-              FnChip(label: cat, square: true, selected: cat == state.categoryTab, onTap: () => state.setCategoryTab(cat)),
+              FnChip(
+                label: '$cat (${state.count((n) => n.category == cat)})',
+                square: true,
+                dense: true,
+                selected: cat == state.categoryTab,
+                onTap: () => state.setCategoryTab(cat),
+              ),
           ]),
           const SizedBox(height: 14),
           Row(children: [
             Expanded(
-              child: Text('${state.categoryTab ?? ''} · ${list.length} ${list.length == 1 ? 'note' : 'notes'}',
+              child: Text('${state.categoryTab ?? ''} · ${list.length} ${list.length == 1 ? 'observation' : 'observations'}',
                   style: condensed(22)),
             ),
             FnChip(
-              label: state.showClosed ? 'Hide solved' : 'Show solved',
+              label: state.showClosed ? 'Hide resolved' : 'Show resolved',
+              dense: true,
               selected: false,
               onTap: () => state.setShowClosed(!state.showClosed),
             ),
           ]),
           const SizedBox(height: 10),
-          if (list.isEmpty) const _Empty(text: 'No notes in this category yet.'),
+          if (list.isEmpty) const _Empty(text: 'No observations in this category yet.'),
           for (final n in list)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),

@@ -9,7 +9,9 @@ import 'settings.dart';
 
 /// Single source of truth for the UI.
 class AppState extends ChangeNotifier {
-  AppState(this.repo, this.settings) : themeMode = settings.themeMode;
+  AppState(this.repo, this.settings)
+      : themeMode = settings.themeMode,
+        fontChoice = settings.fontChoice;
 
   final Repo repo;
   final Settings settings;
@@ -30,12 +32,16 @@ class AppState extends ChangeNotifier {
   Map<String, Set<String>> members = {};
   Project? project;
   List<Note> notes = [];
+  List<ProjectInvite> invites = [];
   Map<String, DateTime> _seen = {};
 
   ThemeMode themeMode;
 
+  /// Font family chosen in Settings ('' = the built-in Barlow).
+  String fontChoice;
+
   // ---- Filters (kept while switching tabs) ----
-  int tab = 0; // 0 open, 1 by date, 2 by category
+  int tab = 0; // 0 open, 1 by date, 2 by category, 3 dashboard
   Set<String> openCategories = {};
   bool onlyMine = false;
   String? categoryTab;
@@ -108,6 +114,7 @@ class AppState extends ChangeNotifier {
       users = await repo.users();
       projects = await repo.projects();
       members = await repo.projectMembers();
+      invites = await repo.invites();
       project = _pickProject();
       notes = project == null ? [] : await repo.notes(project!.id);
       if (project != null && (categoryTab == null || !project!.categories.contains(categoryTab))) {
@@ -165,8 +172,10 @@ class AppState extends ChangeNotifier {
     return m.name.trim().isEmpty || m.name.trim().toLowerCase() == m.email.split('@').first.toLowerCase();
   }
 
-  Future<void> updateMyName(String name) async {
-    me = await repo.updateMyName(name);
+  Future<void> updateMyName(String name) => updateMyProfile(name: name, company: me?.company ?? '');
+
+  Future<void> updateMyProfile({required String name, required String company}) async {
+    me = await repo.updateMyProfile(name: name, company: company);
     notifyListeners();
     await reload(quiet: true);
   }
@@ -181,6 +190,12 @@ class AppState extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------- settings
+
+  Future<void> setFont(String family) async {
+    fontChoice = family;
+    notifyListeners();
+    await settings.setFontChoice(family);
+  }
 
   Future<void> setThemeMode(ThemeMode m) async {
     themeMode = m;
@@ -258,6 +273,8 @@ class AppState extends ChangeNotifier {
 
   String assignedText(Note n) => n.isGeneral ? 'Everyone' : n.assignedIds.map(nameOf).join(', ');
 
+  String companyOf(String id) => userById(id)?.company ?? '';
+
   Note? noteById(String? id) {
     if (id == null) return null;
     for (final n in notes) {
@@ -273,11 +290,38 @@ class AppState extends ChangeNotifier {
       ..sort((a, b) => a.name.compareTo(b.name));
   }
 
+  /// The project team: people added to the project (admins are listed separately).
+  List<AppUser> teamOf(String projectId) {
+    final ids = members[projectId] ?? {};
+    return users.where((u) => u.status != MemberStatus.removed && ids.contains(u.id)).toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+  }
+
+  bool isMemberOf(String projectId) =>
+      canContribute && (isAdmin || (members[projectId]?.contains(me!.id) ?? false));
+
+  /// Suggestions for the given project, newest first.
+  List<ProjectInvite> invitesFor(String projectId, {bool pendingOnly = false}) =>
+      invites.where((i) => i.projectId == projectId && (!pendingOnly || i.isPending)).toList();
+
+  /// Suggestions waiting for an admin, across all projects.
+  List<ProjectInvite> get pendingInvites => invites.where((i) => i.isPending).toList();
+
+  Project? projectById(String id) {
+    for (final p in projects) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
   bool _matchesSearch(Note n) {
     final q = search.trim().toLowerCase();
     if (q.isEmpty) return true;
     return n.name.toLowerCase().contains(q) ||
         n.comment.toLowerCase().contains(q) ||
+        n.code.toLowerCase().contains(q) ||
+        n.location.toLowerCase().contains(q) ||
+        n.obsType.label.toLowerCase().contains(q) ||
         n.category.toLowerCase().contains(q) ||
         nameOf(n.issuerId).toLowerCase().contains(q);
   }
@@ -292,7 +336,7 @@ class AppState extends ChangeNotifier {
     return b.lastActivity.compareTo(a.lastActivity);
   }
 
-  /// Tab 1: Active and Suspended, filtered, by priority then date then activity.
+  /// Tab 1: everything not Resolved or Voided, filtered, by priority then date then activity.
   List<Note> get openNotes {
     final list = notes.where((n) {
       if (n.status.isClosed) return false;
@@ -322,25 +366,31 @@ class AppState extends ChangeNotifier {
 
   int count(bool Function(Note) test) => notes.where(test).length;
 
+  // ---------------------------------------------------------------- dashboard
+
+  DashboardData get dashboard => DashboardData.of(notes, project, this);
+
   // ---------------------------------------------------------------- permissions
 
   bool get isAdmin => me?.isAdmin ?? false;
   bool isIssuer(Note n) => n.issuerId == me?.id;
-  bool canChangeStatus(Note n) => isAdmin || isIssuer(n);
-  bool canChangePriority(Note n) => isAdmin || isIssuer(n);
-  bool canDeactivate(Note n) => isAdmin;
+  /// Only the admin and the person who reported it change the status.
+  bool canChangeStatus(Note n) => canContribute && (isAdmin || isIssuer(n));
+  bool canChangePriority(Note n) => canContribute && (isAdmin || isIssuer(n));
   bool canEdit(Note n) => isAdmin || isIssuer(n);
   bool canDelete(Note n) => isAdmin || (isIssuer(n) && n.replies.isEmpty);
   bool canDeleteReply(Reply r) => isAdmin || r.authorId == me?.id;
 
   // ---------------------------------------------------------------- notifications (bell)
 
-  /// Notes with activity I have not opened yet that involve me:
-  /// assigned to me, issued by me, general notes, or notes I replied to.
+  /// Observations with news I have not opened yet that involve me:
+  /// assigned to me, reported by me, general ones, or ones I joined the discussion of.
+  /// Overdue observations show up for the reporter and the assigned people until opened.
   List<Note> get unreadNotes {
     if (me == null) return [];
     final myId = me!.id;
     final list = notes.where((n) {
+      if (isOverdueForMe(n)) return true;
       final involved =
           n.isGeneral || n.assignedIds.contains(myId) || n.issuerId == myId || n.replies.any((r) => r.authorId == myId);
       if (!involved) return false;
@@ -351,6 +401,15 @@ class AppState extends ChangeNotifier {
     }).toList()
       ..sort((a, b) => b.lastActivity.compareTo(a.lastActivity));
     return list;
+  }
+
+  /// Overdue, I reported it or it is assigned to me, and I have not opened it since it became overdue.
+  bool isOverdueForMe(Note n) {
+    if (me == null || !n.isOverdue) return false;
+    final myId = me!.id;
+    if (n.issuerId != myId && !n.assignedIds.contains(myId)) return false;
+    final seenAt = _seen[n.id];
+    return seenAt == null || seenAt.isBefore(n.dueAt!);
   }
 
   DateTime? _lastActivityByOthers(Note n, String myId) {
@@ -403,8 +462,8 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setStatus(Note n, NoteStatus s) => _run(() async {
-        if (s == NoteStatus.deactivated && !canDeactivate(n)) {
-          throw RepoException('Only an admin can deactivate a note.');
+        if (!canChangeStatus(n)) {
+          throw RepoException('Only the admin and the person who reported it can change the status.');
         }
         await _replace(await repo.updateNote(n.copyWith(status: s)));
       });
@@ -413,8 +472,10 @@ class AppState extends ChangeNotifier {
         await _replace(await repo.updateNote(n.copyWith(priority: p)));
       });
 
-  Future<void> saveEdits(Note edited, {List<List<int>> addPhotos = const []}) => _run(() async {
-        await _replace(await repo.updateNote(edited.copyWith(editedAt: DateTime.now()), addPhotos: addPhotos));
+  Future<void> saveEdits(Note edited, {List<List<int>> addPhotos = const [], List<NewAudio> addAudio = const []}) =>
+      _run(() async {
+        await _replace(
+            await repo.updateNote(edited.copyWith(editedAt: DateTime.now()), addPhotos: addPhotos, addAudio: addAudio));
       });
 
   Future<void> deleteNote(Note n) => _run(() async {
@@ -423,8 +484,9 @@ class AppState extends ChangeNotifier {
         if (selectedNoteId == n.id) selectedNoteId = null;
       });
 
-  Future<void> addReply(Note n, String text, List<List<int>> photos) => _run(() async {
-        final r = await repo.addReply(n, text, photos);
+  Future<void> addReply(Note n, String text, List<List<int>> photos, {List<NewAudio> audio = const []}) =>
+      _run(() async {
+        final r = await repo.addReply(n, text, photos, audio: audio);
         final current = noteById(n.id) ?? n;
         await _replace(current.copyWith(replies: [...current.replies, r]));
         markSeen(n.id);
@@ -448,8 +510,8 @@ class AppState extends ChangeNotifier {
         members = await repo.projectMembers();
       });
 
-  Future<void> createProject(String name) => _run(() async {
-        final p = await repo.createProject(name);
+  Future<void> createProject(Project draft) => _run(() async {
+        final p = await repo.createProject(draft);
         await reload();
         await selectProject(projects.firstWhere((x) => x.id == p.id, orElse: () => p));
       });
@@ -457,6 +519,22 @@ class AppState extends ChangeNotifier {
   Future<void> saveProject(Project p) => _run(() async {
         await repo.updateProject(p);
         await reload();
+      });
+
+  Future<void> suggestMember(String projectId, {required String email, required String name, required String company}) =>
+      _run(() async {
+        await repo.suggestMember(projectId, email: email, name: name, company: company);
+        invites = await repo.invites();
+      });
+
+  Future<void> approveInvite(ProjectInvite i) => _run(() async {
+        await repo.approveInvite(i);
+        await reload();
+      });
+
+  Future<void> declineInvite(ProjectInvite i) => _run(() async {
+        await repo.declineInvite(i);
+        invites = await repo.invites();
       });
 
   bool get canAddSamples => repo is LocalRepo && project != null;
@@ -468,4 +546,89 @@ class AppState extends ChangeNotifier {
           await reload();
         }
       });
+}
+
+/// Numbers for the Dashboard tab.
+class DashboardData {
+  DashboardData._();
+
+  int total = 0, open = 0, inProgress = 0, pendingVerification = 0, onHold = 0, resolved = 0, voided = 0;
+  int overdue = 0, criticalUrgent = 0;
+
+  /// category -> (open, closed). In the project's category order.
+  final Map<String, (int, int)> byCategory = {};
+
+  /// observation type -> count of open ones.
+  final Map<ObsType, int> openByType = {};
+
+  /// One row per assigned person (or "Everyone" for general observations).
+  final List<AssigneeRow> byAssignee = [];
+
+  static DashboardData of(List<Note> notes, Project? project, AppState state) {
+    final d = DashboardData._();
+    final now = DateTime.now();
+    for (final c in project?.categories ?? const <String>[]) {
+      d.byCategory[c] = (0, 0);
+    }
+    final rows = <String, AssigneeRow>{};
+    for (final n in notes) {
+      if (n.status == NoteStatus.voided) {
+        d.voided++;
+        continue; // voided observations are left out of the counts
+      }
+      d.total++;
+      switch (n.status) {
+        case NoteStatus.open:
+          d.open++;
+        case NoteStatus.inProgress:
+          d.inProgress++;
+        case NoteStatus.pendingVerification:
+          d.pendingVerification++;
+        case NoteStatus.onHold:
+          d.onHold++;
+        case NoteStatus.resolved:
+          d.resolved++;
+        case NoteStatus.voided:
+          break;
+      }
+      final closed = n.status.isClosed;
+      final late = n.isOverdueAt(now);
+      if (late) d.overdue++;
+      if (!closed && (n.priority == Priority.urgent || n.priority == Priority.critical)) d.criticalUrgent++;
+      final cat = d.byCategory[n.category] ?? (0, 0);
+      d.byCategory[n.category] = closed ? (cat.$1, cat.$2 + 1) : (cat.$1 + 1, cat.$2);
+      if (!closed) d.openByType[n.obsType] = (d.openByType[n.obsType] ?? 0) + 1;
+      final who = n.isGeneral ? const [''] : n.assignedIds;
+      for (final id in who) {
+        final row = rows.putIfAbsent(
+          id,
+          () => AssigneeRow(
+            userId: id,
+            name: id.isEmpty ? 'Everyone (general)' : state.nameOf(id),
+            company: id.isEmpty ? '' : state.companyOf(id),
+          ),
+        );
+        if (!closed) row.open++;
+        if (late) row.overdue++;
+        if (closed) row.resolved++;
+      }
+    }
+    d.byAssignee
+      ..addAll(rows.values)
+      ..sort((a, b) {
+        final o = b.overdue.compareTo(a.overdue);
+        if (o != 0) return o;
+        final p = b.open.compareTo(a.open);
+        return p != 0 ? p : a.name.compareTo(b.name);
+      });
+    return d;
+  }
+}
+
+class AssigneeRow {
+  AssigneeRow({required this.userId, required this.name, required this.company});
+  final String userId;
+  final String name;
+  final String company;
+  int open = 0, overdue = 0, resolved = 0;
 }

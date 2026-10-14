@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../util/dates.dart';
 import '../widgets/common.dart';
 import '../widgets/photo_picker.dart';
+import '../widgets/voice.dart';
 import 'note_form_screen.dart';
 import 'sign_in_screen.dart';
 
@@ -23,7 +24,7 @@ class NoteDetailScreen extends StatelessWidget {
     final note = state.noteById(noteId);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Note'),
+        title: Text(note?.displayCode ?? 'Observation'),
         actions: [if (note != null) NoteMenu(note: note, popOnDelete: true)],
       ),
       body: NoteDetailView(noteId: noteId),
@@ -50,7 +51,9 @@ class NoteMenu extends StatelessWidget {
         if (v == 'edit') {
           await Navigator.of(context).push(MaterialPageRoute(builder: (_) => NoteFormScreen(existing: note)));
         } else if (v == 'delete') {
-          final ok = await confirm(context, 'Delete this note?', 'This removes the note, its photos and replies for everyone.',
+          final ok = await confirm(context, 'Delete this observation?',
+              'This removes the observation, its photos, voice messages and discussion for everyone.\n\n'
+              'To keep a record instead, set the status to Voided.',
               ok: 'Delete', danger: true);
           if (!ok || !context.mounted) return;
           try {
@@ -62,8 +65,8 @@ class NoteMenu extends StatelessWidget {
         }
       },
       itemBuilder: (_) => [
-        if (canEdit) const PopupMenuItem(value: 'edit', child: Text('Edit note')),
-        if (canDelete) const PopupMenuItem(value: 'delete', child: Text('Delete note')),
+        if (canEdit) const PopupMenuItem(value: 'edit', child: Text('Edit observation')),
+        if (canDelete) const PopupMenuItem(value: 'delete', child: Text('Delete observation')),
       ],
     );
   }
@@ -82,6 +85,7 @@ class _NoteDetailViewState extends State<NoteDetailView> {
   int _photo = 0;
   final _reply = TextEditingController();
   final List<Uint8List> _replyPhotos = [];
+  final List<RecordedClip> _replyVoice = [];
   bool _sending = false;
 
   @override
@@ -97,6 +101,7 @@ class _NoteDetailViewState extends State<NoteDetailView> {
       _photo = 0;
       _reply.clear();
       _replyPhotos.clear();
+      _replyVoice.clear();
     }
   }
 
@@ -108,12 +113,15 @@ class _NoteDetailViewState extends State<NoteDetailView> {
 
   Future<void> _send(Note note) async {
     final text = _reply.text.trim();
-    if (text.isEmpty && _replyPhotos.isEmpty) return;
+    if (text.isEmpty && _replyPhotos.isEmpty && _replyVoice.isEmpty) return;
     setState(() => _sending = true);
     try {
-      await context.read<AppState>().addReply(note, text, List.of(_replyPhotos));
+      await context
+          .read<AppState>()
+          .addReply(note, text, List.of(_replyPhotos), audio: [for (final v in _replyVoice) v.audio]);
       _reply.clear();
       _replyPhotos.clear();
+      _replyVoice.clear();
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -124,9 +132,10 @@ class _NoteDetailViewState extends State<NoteDetailView> {
   Future<void> _setStatus(Note note, NoteStatus s) async {
     final state = context.read<AppState>();
     if (s == note.status) return;
-    if (s == NoteStatus.deactivated) {
-      final ok = await confirm(context, 'Deactivate this note?',
-          'It stays visible to everyone, marked as deactivated and grayed out.', ok: 'Deactivate');
+    if (s == NoteStatus.voided) {
+      final ok = await confirm(context, 'Void this observation?',
+          'Use this when it was canceled or created by mistake. It stays visible to everyone, marked Voided and grayed out.',
+          ok: 'Void');
       if (!ok) return;
     }
     try {
@@ -142,7 +151,7 @@ class _NoteDetailViewState extends State<NoteDetailView> {
     final c = FnColors.of(context);
     final note = state.noteById(widget.noteId);
     if (note == null) {
-      return Center(child: Text('This note was deleted.', style: TextStyle(color: c.muted)));
+      return Center(child: Text('This observation was deleted.', style: TextStyle(color: c.muted)));
     }
     if (_photo >= note.photos.length) _photo = 0;
 
@@ -151,10 +160,14 @@ class _NoteDetailViewState extends State<NoteDetailView> {
       children: [
         ClosedFade(
           closed: note.status.isClosed,
-          child: Wrap(spacing: 6, runSpacing: 6, children: [
+          child: Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            CodeTag(note, large: true),
+            const SizedBox(width: 2),
+            TypeTag(note.obsType, large: true),
             PriorityBadge(note.priority, large: true),
             StatusBadge(note.status, large: true),
             CategoryTag(note.category, large: true),
+            OverdueBadge(note, large: true),
           ]),
         ),
         const SizedBox(height: 10),
@@ -168,9 +181,10 @@ class _NoteDetailViewState extends State<NoteDetailView> {
         const SizedBox(height: 6),
         Text.rich(
           TextSpan(style: TextStyle(fontSize: 14, color: c.muted), children: [
-            const TextSpan(text: 'Issued by '),
+            const TextSpan(text: 'Reported by '),
             TextSpan(text: state.nameOf(note.issuerId), style: TextStyle(color: c.ink, fontWeight: FontWeight.w700)),
-            TextSpan(text: ' · ${dayTimeText(note.createdAt)}'),
+            if (state.companyOf(note.issuerId).isNotEmpty) TextSpan(text: ' (${state.companyOf(note.issuerId)})'),
+            TextSpan(text: ' · ${reportedText(note.createdAt)}'),
             if (note.editedAt != null) const TextSpan(text: ' · edited'),
           ]),
         ),
@@ -214,34 +228,55 @@ class _NoteDetailViewState extends State<NoteDetailView> {
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const SectionLabel('Issuer comment'),
+            const SectionLabel('Description'),
             const SizedBox(height: 6),
-            SelectableText(note.comment.isEmpty ? 'No comment.' : note.comment,
+            SelectableText(note.comment.isEmpty ? 'No description.' : note.comment,
                 style: const TextStyle(fontSize: 15, height: 1.45)),
+            if (note.audio.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              VoiceList(refs: note.audio),
+            ],
           ]),
         ),
         const SizedBox(height: 14),
         _DetailsGrid(note: note),
-        if (state.canChangeStatus(note)) ...[
-          const SizedBox(height: 16),
-          SectionLabel('Status',
-              trailing: Text(state.isAdmin ? 'Admin' : 'Issuer', style: TextStyle(fontSize: 12, color: c.muted))),
-          const SizedBox(height: 8),
+        const SizedBox(height: 16),
+        SectionLabel('Status',
+            trailing: Text(
+              state.canChangeStatus(note) ? (state.isAdmin ? 'You can change it (admin)' : 'You can change it (reporter)') : '',
+              style: TextStyle(fontSize: 12, color: c.muted),
+            )),
+        const SizedBox(height: 8),
+        if (state.canChangeStatus(note))
           Wrap(spacing: 6, runSpacing: 6, children: [
             for (final s in NoteStatus.values)
-              if (s != NoteStatus.deactivated || state.canDeactivate(note))
-                FnChip(
-                  label: s == NoteStatus.deactivated && note.status != s ? 'Deactivate' : s.label,
+              Tooltip(
+                message: s.meaning,
+                child: FnChip(
+                  label: '${s.emoji} ${s.label}',
                   square: true,
+                  dense: true,
                   selected: note.status == s,
                   onTap: () => _setStatus(note, s),
                 ),
+              ),
+          ])
+        else
+          Row(children: [
+            StatusBadge(note.status, large: true),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '${note.status.meaning}. Only the admin and the reporter (${state.nameOf(note.issuerId)}) can change the status'
+                '${state.isAssignedToMe(note) ? ' — tell them in the Discussion when it is corrected.' : '.'}',
+                style: TextStyle(fontSize: 13, color: c.muted),
+              ),
+            ),
           ]),
-        ],
         const SizedBox(height: 18),
-        SectionLabel('Replies (${note.replies.length})'),
+        SectionLabel('Discussion (${note.replies.length})'),
         const SizedBox(height: 10),
-        if (note.replies.isEmpty) Text('No replies yet.', style: TextStyle(color: c.muted)),
+        if (note.replies.isEmpty) Text('No messages yet.', style: TextStyle(color: c.muted)),
         for (final r in note.replies) _ReplyTile(reply: r),
       ],
     );
@@ -251,17 +286,20 @@ class _NoteDetailViewState extends State<NoteDetailView> {
       if (!state.canContribute)
         _JoinBar(pending: state.isPending)
       else
-      _Composer(
-        controller: _reply,
-        photos: _replyPhotos,
-        sending: _sending,
-        onAddPhotos: (camera) async {
-          final shots = await pickAndMarkUp(context, camera: camera);
-          if (shots.isNotEmpty) setState(() => _replyPhotos.addAll(shots));
-        },
-        onRemovePhoto: (i) => setState(() => _replyPhotos.removeAt(i)),
-        onSend: () => _send(note),
-      ),
+        _Composer(
+          controller: _reply,
+          photos: _replyPhotos,
+          voice: _replyVoice,
+          sending: _sending,
+          onAddPhotos: (camera) async {
+            final shots = await pickAndMarkUp(context, camera: camera);
+            if (shots.isNotEmpty) setState(() => _replyPhotos.addAll(shots));
+          },
+          onRemovePhoto: (i) => setState(() => _replyPhotos.removeAt(i)),
+          onRecorded: (clip) => setState(() => _replyVoice.add(clip)),
+          onRemoveVoice: (i) => setState(() => _replyVoice.removeAt(i)),
+          onSend: () => _send(note),
+        ),
     ]);
   }
 }
@@ -374,8 +412,7 @@ class _DetailsGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final c = FnColors.of(context);
-    Widget cell(String label, Widget value) => Container(
-          color: c.surface,
+    Widget cell(String label, Widget value) => Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(label, style: TextStyle(fontSize: 12, color: c.muted)),
@@ -390,7 +427,7 @@ class _DetailsGrid extends StatelessWidget {
             child: DropdownButton<Priority>(
               value: note.priority,
               isDense: true,
-              style: valueStyle.copyWith(color: c.ink, fontFamily: 'Barlow'),
+              style: valueStyle.copyWith(color: c.ink, fontFamily: Theme.of(context).textTheme.bodyMedium?.fontFamily),
               dropdownColor: c.surface,
               items: [
                 for (final p in Priority.values)
@@ -415,23 +452,43 @@ class _DetailsGrid extends StatelessWidget {
           )
         : Text(note.priority.label, style: valueStyle);
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        decoration: BoxDecoration(color: c.line, border: Border.all(color: c.line), borderRadius: BorderRadius.circular(12)),
-        child: Column(children: [
-          Row(children: [
-            Expanded(child: cell('Assigned to', Text(state.assignedText(note), style: valueStyle))),
-            const SizedBox(width: 1),
-            Expanded(child: cell('Category', Text(note.category, style: valueStyle))),
-          ]),
-          const SizedBox(height: 1),
-          Row(children: [
-            Expanded(child: cell('Priority', priority)),
-            const SizedBox(width: 1),
-            Expanded(child: cell('Created', Text(dayTimeText(note.createdAt), style: valueStyle))),
-          ]),
-        ]),
+    final Widget due;
+    if (note.dueAt == null) {
+      due = Text('No due date', style: valueStyle.copyWith(color: c.muted));
+    } else if (note.isOverdue) {
+      due = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(shortDate(note.dueAt!), style: valueStyle),
+        const SizedBox(height: 4),
+        OverdueBadge(note),
+      ]);
+    } else {
+      due = Text(
+        note.status.isClosed ? shortDate(note.dueAt!) : '${shortDate(note.dueAt!)} · ${dueText(note.dueAt!)}',
+        style: valueStyle,
+      );
+    }
+
+    final issuerCompany = state.companyOf(note.issuerId);
+    final pairs = <(String, Widget)>[
+      ('Reported By', Text(issuerCompany.isEmpty ? state.nameOf(note.issuerId) : '${state.nameOf(note.issuerId)} · $issuerCompany',
+          style: valueStyle)),
+      ('Reported On', Text(reportedText(note.createdAt), style: valueStyle)),
+      ('Assigned To', Text(state.assignedText(note), style: valueStyle)),
+      ('Category', Text(note.category, style: valueStyle)),
+      ('Priority', priority),
+      ('Observation Type', Text(note.obsType.label, style: valueStyle)),
+      ('Location', Text(note.location.isEmpty ? '—' : note.location, style: valueStyle)),
+      ('Due Date', due),
+    ];
+
+    return Container(
+      decoration: BoxDecoration(color: c.surface, border: Border.all(color: c.line), borderRadius: BorderRadius.circular(12)),
+      child: Table(
+        border: TableBorder.symmetric(inside: BorderSide(color: c.line)),
+        children: [
+          for (var i = 0; i < pairs.length; i += 2)
+            TableRow(children: [cell(pairs[i].$1, pairs[i].$2), cell(pairs[i + 1].$1, pairs[i + 1].$2)]),
+        ],
       ),
     );
   }
@@ -465,13 +522,13 @@ class _ReplyTile extends StatelessWidget {
                 Text(dayTimeText(reply.createdAt), style: TextStyle(fontSize: 13, color: c.muted)),
                 if (state.canDeleteReply(reply))
                   IconButton(
-                    tooltip: 'Delete reply',
+                    tooltip: 'Delete message',
                     visualDensity: VisualDensity.compact,
                     iconSize: 18,
                     color: c.muted,
                     icon: const Icon(Icons.delete_outline),
                     onPressed: () async {
-                      final ok = await confirm(context, 'Delete this reply?', 'It will be removed for everyone.',
+                      final ok = await confirm(context, 'Delete this message?', 'It will be removed for everyone.',
                           ok: 'Delete', danger: true);
                       if (!ok) return;
                       try {
@@ -488,6 +545,10 @@ class _ReplyTile extends StatelessWidget {
                   padding: const EdgeInsets.only(right: 6),
                   child: SelectableText(reply.text, style: const TextStyle(fontSize: 14, height: 1.4)),
                 ),
+              ],
+              if (reply.audio.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                VoiceList(refs: reply.audio),
               ],
               if (reply.photos.isNotEmpty) ...[
                 const SizedBox(height: 8),
@@ -514,17 +575,23 @@ class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
     required this.photos,
+    required this.voice,
     required this.sending,
     required this.onAddPhotos,
     required this.onRemovePhoto,
+    required this.onRecorded,
+    required this.onRemoveVoice,
     required this.onSend,
   });
 
   final TextEditingController controller;
   final List<Uint8List> photos;
+  final List<RecordedClip> voice;
   final bool sending;
   final void Function(bool camera) onAddPhotos;
   final void Function(int index) onRemovePhoto;
+  final void Function(RecordedClip clip) onRecorded;
+  final void Function(int index) onRemoveVoice;
   final VoidCallback onSend;
 
   @override
@@ -549,7 +616,25 @@ class _Composer extends StatelessWidget {
                 ),
               ),
             ),
+          if (voice.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(spacing: 6, runSpacing: 6, children: [
+                  for (var i = 0; i < voice.length; i++)
+                    VoicePlayer(
+                      key: ValueKey(voice[i].path),
+                      filePath: voice[i].path,
+                      label: 'Voice · ${clockText(voice[i].length)}',
+                      onRemove: () => onRemoveVoice(i),
+                    ),
+                ]),
+              ),
+            ),
           Row(children: [
+            RecordVoiceButton(compact: true, enabled: !sending, onRecorded: onRecorded),
+            const SizedBox(width: 6),
             if (cameraAvailable)
               IconButton(
                 tooltip: 'Take a photo',
@@ -574,7 +659,7 @@ class _Composer extends StatelessWidget {
                 maxLines: 4,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: InputDecoration(
-                  hintText: 'Write a reply…',
+                  hintText: 'Add to the discussion…',
                   fillColor: c.surface2,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide(color: c.line2)),
@@ -587,7 +672,7 @@ class _Composer extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             IconButton.filled(
-              tooltip: 'Send reply',
+              tooltip: 'Send',
               onPressed: sending ? null : onSend,
               style: IconButton.styleFrom(backgroundColor: c.accent, foregroundColor: c.accentInk, minimumSize: const Size(44, 44)),
               icon: sending
@@ -619,7 +704,9 @@ class _JoinBar extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              pending ? 'You can reply once an admin approves your account.' : 'Sign in to reply or add photos.',
+              pending
+                  ? 'You can join the discussion once an admin approves your account.'
+                  : 'Sign in to join the discussion or add photos.',
               style: TextStyle(color: c.muted),
             ),
           ),

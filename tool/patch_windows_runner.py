@@ -1,13 +1,13 @@
 """Patches the generated Windows runner (windows/runner/main.cpp) after `flutter create`.
 
-If Field Notes is already open and a sign-in link is clicked, Windows starts a
+If the app is already open and a sign-in link is clicked, Windows starts a
 second copy. This hands the link to the open window instead and brings it to the
 front (pattern from the app_links package README).
 """
 import pathlib
 import sys
 
-TITLE = "Christman Field Notes"
+TITLE = "Christman Field Observations"
 path = pathlib.Path("windows/runner/main.cpp")
 src = path.read_text(encoding="utf-8")
 
@@ -17,7 +17,7 @@ if "SendAppLinkToInstance" in src:
 
 helper = r'''#include "app_links/app_links_plugin_c_api.h"
 
-// Sends a clicked link to an already-open Field Notes window, if there is one.
+// Sends a clicked link to an already-open app window, if there is one.
 bool SendAppLinkToInstance(const std::wstring& title) {
   HWND hwnd = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", title.c_str());
   if (hwnd) {

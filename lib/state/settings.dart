@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// The company's shared Field Notes server (Supabase). The publishable key is meant to be
+/// The company's shared Field Observations server (Supabase). The publishable key is meant to be
 /// shipped inside apps; the database's security rules (supabase/schema.sql) protect the data.
 const companyServerUrl = 'https://lhffwvrebwcvwpjfhcll.supabase.co';
 const companyServerKey = 'sb_publishable_NiDBo7xCIA5qNrnUEdZTbA_S_JJvVra';
@@ -26,6 +26,10 @@ class Settings {
         _ => ThemeMode.system,
       };
   Future<void> setThemeMode(ThemeMode m) => _prefs.setString('theme', m.name);
+
+  /// Font family chosen in Settings; empty means the built-in Barlow.
+  String get fontChoice => _prefs.getString('font') ?? '';
+  Future<void> setFontChoice(String family) => _prefs.setString('font', family);
 
   /// A value typed in Settings wins; otherwise the built-in company server is used.
   String get serverUrl => _nonEmpty(_prefs.getString('server_url')) ?? _builtInUrl;

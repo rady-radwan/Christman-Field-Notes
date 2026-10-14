@@ -16,7 +16,7 @@ const _bucket = 'photos';
 /// Supabase > Authentication > URL Configuration > Redirect URLs.
 const signInRedirect = 'christman-fieldnotes://login-callback';
 
-/// Shared server: every signed-in team member sees the same notes.
+/// Shared server: every project member sees the same observations.
 /// Database tables and security rules are in supabase/schema.sql.
 class SupabaseRepo extends Repo {
   SupabaseRepo._(this._url);
@@ -60,7 +60,7 @@ class SupabaseRepo extends Repo {
   void _listen() {
     _channel?.unsubscribe();
     _channel = _db
-        .channel('field-notes-changes')
+        .channel('field-observations-changes')
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',
@@ -242,8 +242,13 @@ class SupabaseRepo extends Repo {
   }
 
   @override
-  Future<AppUser> updateMyName(String name) => _guard(() async {
-        final row = await _db.from('profiles').update({'name': name.trim()}).eq('id', _myId()).select().single();
+  Future<AppUser> updateMyProfile({required String name, required String company}) => _guard(() async {
+        final row = await _db
+            .from('profiles')
+            .update({'name': name.trim(), 'company': company.trim()})
+            .eq('id', _myId())
+            .select()
+            .single();
         return AppUser.fromJson(row);
       });
 
@@ -262,7 +267,7 @@ class SupabaseRepo extends Repo {
   @override
   Future<List<AppUser>> users() => _guard(() async {
         // Guests may read names but not email addresses (see column grants in schema.sql).
-        final cols = _db.auth.currentUser == null ? 'id,name,is_admin,status' : '*';
+        final cols = _db.auth.currentUser == null ? 'id,name,is_admin,status,company' : '*';
         final rows = await _db.from('profiles').select(cols).order('name');
         return rows.map(AppUser.fromJson).toList();
       });
@@ -273,6 +278,7 @@ class SupabaseRepo extends Repo {
           'name': user.name,
           'is_admin': user.isAdmin,
           'status': user.status.name,
+          'company': user.company,
         }).eq('id', user.id);
       });
 
@@ -283,10 +289,16 @@ class SupabaseRepo extends Repo {
       });
 
   @override
-  Future<Project> createProject(String name) => _guard(() async {
+  Future<Project> createProject(Project draft) => _guard(() async {
         final row = await _db
             .from('projects')
-            .insert({'name': name.trim(), 'categories': defaultCategories})
+            .insert({
+              'name': draft.name.trim(),
+              'categories': draft.categories,
+              'abbr': draft.abbr.trim().toUpperCase(),
+              'category_abbrs': draft.categoryAbbrs,
+              'guest_visible': draft.guestVisible,
+            })
             .select()
             .single();
         final pr = Project.fromJson(row);
@@ -298,7 +310,13 @@ class SupabaseRepo extends Repo {
   Future<void> updateProject(Project project) => _guard(() async {
         await _db
             .from('projects')
-            .update({'name': project.name, 'categories': project.categories}).eq('id', project.id);
+            .update({
+              'name': project.name,
+              'categories': project.categories,
+              'abbr': project.abbr.trim().toUpperCase(),
+              'category_abbrs': project.categoryAbbrs,
+              'guest_visible': project.guestVisible,
+            }).eq('id', project.id);
       });
 
   @override
@@ -321,20 +339,58 @@ class SupabaseRepo extends Repo {
       });
 
   @override
+  Future<List<ProjectInvite>> invites() => _guard(() async {
+        if (_db.auth.currentUser == null) return <ProjectInvite>[];
+        final rows = await _db.from('project_invites').select().order('created_at', ascending: false);
+        return rows.map(ProjectInvite.fromJson).toList();
+      });
+
+  @override
+  Future<void> suggestMember(String projectId, {required String email, required String name, required String company}) =>
+      _guard(() async {
+        try {
+          await _db.from('project_invites').insert({
+            'project_id': projectId,
+            'email': email.trim().toLowerCase(),
+            'name': name.trim(),
+            'company': company.trim(),
+            'invited_by': _myId(),
+          });
+        } on PostgrestException catch (e) {
+          if (e.code == '23505') throw RepoException('That person is already waiting for approval on this project.');
+          rethrow;
+        }
+      });
+
+  @override
+  Future<void> approveInvite(ProjectInvite invite) => _guard(() async {
+        await _db.rpc('approve_invite', params: {'invite_id': invite.id});
+      });
+
+  @override
+  Future<void> declineInvite(ProjectInvite invite) => _guard(() async {
+        await _db.from('project_invites').update({'status': 'declined'}).eq('id', invite.id);
+      });
+
+  @override
   Future<List<Note>> notes(String projectId) => _guard(() async {
         final rows = await _db.from('notes').select('*, replies(*)').eq('project_id', projectId);
         return rows.map(Note.fromJson).toList();
       });
 
-  Future<String> _upload(String folder, List<int> bytes) async {
-    final path = '$folder/${_uuid.v4()}.jpg';
+  Future<String> _upload(String folder, List<int> bytes, {String ext = 'jpg'}) async {
+    final path = '$folder/${_uuid.v4()}.$ext';
+    final type = switch (ext) { 'm4a' => 'audio/mp4', 'wav' => 'audio/wav', _ => 'image/jpeg' };
     await _db.storage.from(_bucket).uploadBinary(
           path,
           Uint8List.fromList(bytes),
-          fileOptions: const FileOptions(contentType: 'image/jpeg'),
+          fileOptions: FileOptions(contentType: type),
         );
     return 'sb:$path';
   }
+
+  Future<List<String>> _uploadAudio(String folder, List<NewAudio> clips) async =>
+      [for (final a in clips) await _upload(folder, a.bytes, ext: a.extension)];
 
   @override
   Future<Note> createNote(String projectId, NoteDraft draft) => _guard(() async {
@@ -343,6 +399,7 @@ class SupabaseRepo extends Repo {
         for (final b in draft.newPhotos) {
           photos.add(await _upload('$projectId/$id', b));
         }
+        final audio = await _uploadAudio('$projectId/$id', draft.newAudio);
         final row = await _db
             .from('notes')
             .insert({
@@ -352,10 +409,14 @@ class SupabaseRepo extends Repo {
               'comment': draft.comment,
               'category': draft.category,
               'priority': draft.priority.name,
-              'status': NoteStatus.active.name,
+              'status': NoteStatus.open.dbName,
               'issuer_id': _myId(),
               'assigned_ids': draft.assignedIds,
               'photos': photos,
+              'obs_type': draft.obsType.dbName,
+              'location': draft.location.trim(),
+              'due_at': draft.dueAt?.toUtc().toIso8601String(),
+              'audio': audio,
             })
             .select('*, replies(*)')
             .single();
@@ -363,11 +424,13 @@ class SupabaseRepo extends Repo {
       });
 
   @override
-  Future<Note> updateNote(Note note, {List<List<int>> addPhotos = const []}) => _guard(() async {
+  Future<Note> updateNote(Note note, {List<List<int>> addPhotos = const [], List<NewAudio> addAudio = const []}) =>
+      _guard(() async {
         final added = <String>[];
         for (final b in addPhotos) {
           added.add(await _upload('${note.projectId}/${note.id}', b));
         }
+        final addedAudio = await _uploadAudio('${note.projectId}/${note.id}', addAudio);
         final row = await _db
             .from('notes')
             .update({
@@ -375,9 +438,13 @@ class SupabaseRepo extends Repo {
               'comment': note.comment,
               'category': note.category,
               'priority': note.priority.name,
-              'status': note.status.name,
+              'status': note.status.dbName,
               'assigned_ids': note.assignedIds,
               'photos': [...note.photos, ...added],
+              'obs_type': note.obsType.dbName,
+              'location': note.location.trim(),
+              'due_at': note.dueAt?.toUtc().toIso8601String(),
+              'audio': [...note.audio, ...addedAudio],
               'edited_at': note.editedAt?.toUtc().toIso8601String(),
               'updated_at': DateTime.now().toUtc().toIso8601String(),
             })
@@ -393,14 +460,16 @@ class SupabaseRepo extends Repo {
       });
 
   @override
-  Future<Reply> addReply(Note note, String text, List<List<int>> photos) => _guard(() async {
+  Future<Reply> addReply(Note note, String text, List<List<int>> photos, {List<NewAudio> audio = const []}) =>
+      _guard(() async {
         final refs = <String>[];
         for (final b in photos) {
           refs.add(await _upload('${note.projectId}/${note.id}', b));
         }
+        final clips = await _uploadAudio('${note.projectId}/${note.id}', audio);
         final row = await _db
             .from('replies')
-            .insert({'note_id': note.id, 'author_id': _myId(), 'text': text, 'photos': refs})
+            .insert({'note_id': note.id, 'author_id': _myId(), 'text': text, 'photos': refs, 'audio': clips})
             .select()
             .single();
         return Reply.fromJson(row);
@@ -411,15 +480,20 @@ class SupabaseRepo extends Repo {
         await _db.from('replies').delete().eq('id', reply.id);
       });
 
-  @override
-  Future<ImageProvider> image(String ref) async {
+  Future<String> _signedUrl(String ref) async {
     final path = ref.startsWith('sb:') ? ref.substring(3) : ref;
     final cached = _signedUrls[path];
-    if (cached != null && cached.$2.isAfter(DateTime.now())) return NetworkImage(cached.$1);
+    if (cached != null && cached.$2.isAfter(DateTime.now())) return cached.$1;
     final url = await _guard(() => _db.storage.from(_bucket).createSignedUrl(path, 60 * 60 * 24));
     _signedUrls[path] = (url, DateTime.now().add(const Duration(hours: 23)));
-    return NetworkImage(url);
+    return url;
   }
+
+  @override
+  Future<ImageProvider> image(String ref) async => NetworkImage(await _signedUrl(ref));
+
+  @override
+  Future<Uri> audioUri(String ref) async => Uri.parse(await _signedUrl(ref));
 
   @override
   void dispose() {

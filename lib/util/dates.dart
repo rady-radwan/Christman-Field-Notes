@@ -25,6 +25,33 @@ String timeText(DateTime d) {
 
 String dayTimeText(DateTime d) => '${dayText(d)}, ${timeText(d)}';
 
+const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/// When an observation was reported: "Tue, Oct 13 · 4:31 PM".
+String reportedText(DateTime d) => '${_weekdays[d.weekday - 1]}, ${shortDate(d)} · ${timeText(d)}';
+
+/// A length of time for people: "3 days, 4 hrs", "5 hrs, 12 min", "20 min".
+String spanText(Duration d) {
+  if (d.isNegative) d = -d;
+  String unit(int n, String one, String many) => '$n ${n == 1 ? one : many}';
+  final days = d.inDays, hours = d.inHours % 24, mins = d.inMinutes % 60;
+  if (days > 0) return hours > 0 ? '${unit(days, 'day', 'days')}, ${unit(hours, 'hr', 'hrs')}' : unit(days, 'day', 'days');
+  if (d.inHours > 0) return mins > 0 ? '${unit(d.inHours, 'hr', 'hrs')}, $mins min' : unit(d.inHours, 'hr', 'hrs');
+  return '${d.inMinutes < 1 ? 1 : d.inMinutes} min';
+}
+
+/// Days until the due date: "Due today", "Due tomorrow", "Due in 5 days", "Was due 2 days ago".
+String dueText(DateTime due, [DateTime? now]) {
+  final days = _day(due).difference(_day(now ?? DateTime.now())).inDays;
+  if (days == 0) return 'Due today';
+  if (days == 1) return 'Due tomorrow';
+  if (days > 1) return 'Due in $days days';
+  return days == -1 ? 'Was due yesterday' : 'Was due ${-days} days ago';
+}
+
+/// "🔴 OVERDUE · 3 days, 4 hrs".
+String overdueText(DateTime due, [DateTime? now]) => '🔴 OVERDUE · ${spanText((now ?? DateTime.now()).difference(due))}';
+
 /// The four non-overlapping date groups used by the "By date" tab.
 enum DateGroup { thisWeek, pastWeek, earlierThisMonth, older }
 

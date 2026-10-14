@@ -2,7 +2,8 @@
 
 - App name on the home screen, internet permission for release builds.
 - "christman-fieldnotes://login-callback" links (the sign-in email) open the app.
-- Christman Field Notes launcher icon.
+- Christman Field Observations launcher icon.
+- Microphone permission for voice messages.
 - Release builds signed with the project's own key, so each new APK installs
   over the previous one.
 """
@@ -23,10 +24,11 @@ def fail(msg: str) -> None:
 # ---------------------------------------------------------------- manifest
 m = manifest_path.read_text(encoding="utf-8")
 
-m = re.sub(r'android:label="[^"]*"', 'android:label="Field Notes"', m, count=1)
+m = re.sub(r'android:label="[^"]*"', 'android:label="Field Observations"', m, count=1)
 
-if "android.permission.INTERNET" not in m:
-    m = m.replace("<application", '<uses-permission android:name="android.permission.INTERNET"/>\n    <application', 1)
+for perm in ("INTERNET", "RECORD_AUDIO"):
+    if f"android.permission.{perm}" not in m:
+        m = m.replace("<application", f'<uses-permission android:name="android.permission.{perm}"/>\n    <application', 1)
 
 if "christman-fieldnotes" not in m:
     link_filter = """

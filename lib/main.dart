@@ -37,11 +37,12 @@ class FieldNotesApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mode = context.select<AppState, ThemeMode>((s) => s.themeMode);
+    final font = context.select<AppState, String>((s) => s.fontChoice);
     return MaterialApp(
-      title: 'Christman Field Notes',
+      title: 'Christman Field Observations',
       debugShowCheckedModeBanner: false,
-      theme: buildTheme(Brightness.light),
-      darkTheme: buildTheme(Brightness.dark),
+      theme: buildTheme(Brightness.light, font: font),
+      darkTheme: buildTheme(Brightness.dark, font: font),
       themeMode: mode,
       home: const _Root(),
     );
@@ -57,7 +58,7 @@ class _Root extends StatelessWidget {
     if (state.booting) {
       return const Scaffold(body: Center(child: BrandLogo(full: true, height: 44)));
     }
-    // Everyone lands on the notes. Signing in is only needed to add or change things.
+    // Everyone lands on the observations. Signing in is only needed to add or change things.
     return const HomeScreen();
   }
 }

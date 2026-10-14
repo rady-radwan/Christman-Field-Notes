@@ -32,11 +32,24 @@ class FnColors extends ThemeExtension<FnColors> {
     required this.dashed,
     required this.urgentText,
     required this.statusColors,
+    required this.panel,
+    required this.card,
+    required this.side,
+    required this.sideInk,
+    required this.sideMuted,
+    required this.sideLine,
+    required this.sideSel,
   });
 
   final bool dark;
   final Color bg, surface, surface2, ink, ink2, muted, line, line2, head, headLine, pill;
   final Color accent, accentInk, accentText, selBg, selFg, avatarBg, avatarInk, tabOff, dashed, urgentText;
+
+  /// Middle list panel and the cards on it.
+  final Color panel, card;
+
+  /// Left sidebar (desktop): warm dark brown in both modes.
+  final Color side, sideInk, sideMuted, sideLine, sideSel;
 
   /// Status -> (text color, background color).
   final Map<NoteStatus, (Color, Color)> statusColors;
@@ -68,11 +81,20 @@ class FnColors extends ThemeExtension<FnColors> {
     dashed: Color(0xFFA39E96),
     urgentText: Color(0xFFB3261E),
     statusColors: {
-      NoteStatus.active: (Color(0xFF2E7D4F), Color(0xFFE3F1E8)),
-      NoteStatus.suspended: (Color(0xFF8A5A00), Color(0xFFFBF0D9)),
-      NoteStatus.solved: (Color(0xFF4B5258), Color(0xFFE6E8E6)),
-      NoteStatus.deactivated: (Color(0xFF4B5258), Color(0xFFE6E8E6)),
+      NoteStatus.open: (Color(0xFF1F5FAD), Color(0xFFE3EDFA)),
+      NoteStatus.inProgress: (Color(0xFF8A6100), Color(0xFFFDF1D6)),
+      NoteStatus.pendingVerification: (Color(0xFFB04A00), Color(0xFFFDE7D7)),
+      NoteStatus.resolved: (Color(0xFF2E7D4F), Color(0xFFE3F1E8)),
+      NoteStatus.onHold: (Color(0xFF5B6168), Color(0xFFECEDEE)),
+      NoteStatus.voided: (Color(0xFF3A3D41), Color(0xFFDCDDDF)),
     },
+    panel: Color(0xFFE9E5DE),
+    card: Color(0xFFFFFFFF),
+    side: Color(0xFF231D18),
+    sideInk: Color(0xFFF3EEE8),
+    sideMuted: Color(0xFFB0A79C),
+    sideLine: Color(0xFF3B322B),
+    sideSel: Color(0xFFAE734B),
   );
 
   static const darkColors = FnColors(
@@ -99,11 +121,20 @@ class FnColors extends ThemeExtension<FnColors> {
     dashed: Color(0xFF5A5650),
     urgentText: Color(0xFFF2867E),
     statusColors: {
-      NoteStatus.active: (Color(0xFF7BC896), Color(0xFF1D3326)),
-      NoteStatus.suspended: (Color(0xFFE2B05A), Color(0xFF3A2E17)),
-      NoteStatus.solved: (Color(0xFFA5ABA8), Color(0xFF2A2D2C)),
-      NoteStatus.deactivated: (Color(0xFFA5ABA8), Color(0xFF2A2D2C)),
+      NoteStatus.open: (Color(0xFF8AB8F0), Color(0xFF1A2A40)),
+      NoteStatus.inProgress: (Color(0xFFF0C55A), Color(0xFF3A2F14)),
+      NoteStatus.pendingVerification: (Color(0xFFF5A167), Color(0xFF3D2616)),
+      NoteStatus.resolved: (Color(0xFF7BC896), Color(0xFF1D3326)),
+      NoteStatus.onHold: (Color(0xFFB5BAC0), Color(0xFF2B2E31)),
+      NoteStatus.voided: (Color(0xFF8E9297), Color(0xFF232426)),
     },
+    panel: Color(0xFF1E1F21),
+    card: Color(0xFF2A2B2E),
+    side: Color(0xFF1A1512),
+    sideInk: Color(0xFFF1ECE6),
+    sideMuted: Color(0xFFA49B90),
+    sideLine: Color(0xFF332B25),
+    sideSel: Color(0xFFB98052),
   );
 
   static FnColors of(BuildContext context) => Theme.of(context).extension<FnColors>() ?? light;
@@ -118,8 +149,33 @@ class FnColors extends ThemeExtension<FnColors> {
   }
 }
 
-ThemeData buildTheme(Brightness brightness) {
+/// Fonts offered in Settings. '' is the built-in Christman look (Barlow).
+const fontChoices = <String>[
+  '',
+  'Roboto',
+  'Open Sans',
+  'Google Sans',
+  'Inter',
+  'Montserrat',
+  'Work Sans',
+  'Lato',
+  'Josefin Sans',
+  'Poppins',
+  'Nunito Sans',
+  'Source Sans 3',
+  'IBM Plex Sans',
+  'Noto Sans',
+];
+
+String fontLabel(String f) => f.isEmpty ? 'Barlow (Christman default)' : f;
+
+/// Family used by [condensed] headings; follows the chosen font.
+String _headingFamily = 'BarlowCondensed';
+
+ThemeData buildTheme(Brightness brightness, {String font = ''}) {
   final c = brightness == Brightness.dark ? FnColors.darkColors : FnColors.light;
+  final family = fontChoices.contains(font) && font.isNotEmpty ? font : 'Barlow';
+  _headingFamily = family == 'Barlow' ? 'BarlowCondensed' : family;
   final scheme = ColorScheme.fromSeed(seedColor: brandCopper, brightness: brightness).copyWith(
     primary: c.accent,
     onPrimary: c.accentInk,
@@ -134,14 +190,14 @@ ThemeData buildTheme(Brightness brightness) {
     useMaterial3: true,
     brightness: brightness,
     colorScheme: scheme,
-    fontFamily: 'Barlow',
+    fontFamily: family,
     scaffoldBackgroundColor: c.bg,
     extensions: [c],
   );
   OutlineInputBorder border(Color color, [double w = 1]) =>
       OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: color, width: w));
   return base.copyWith(
-    textTheme: base.textTheme.apply(bodyColor: c.ink, displayColor: c.ink, fontFamily: 'Barlow'),
+    textTheme: base.textTheme.apply(bodyColor: c.ink, displayColor: c.ink, fontFamily: family),
     appBarTheme: AppBarTheme(
       backgroundColor: c.head,
       foregroundColor: c.ink,
@@ -150,7 +206,7 @@ ThemeData buildTheme(Brightness brightness) {
       surfaceTintColor: Colors.transparent,
       shape: Border(bottom: BorderSide(color: c.headLine)),
       titleTextStyle: TextStyle(
-        fontFamily: 'BarlowCondensed',
+        fontFamily: _headingFamily,
         fontWeight: FontWeight.w700,
         fontSize: 22,
         color: c.ink,
@@ -170,7 +226,7 @@ ThemeData buildTheme(Brightness brightness) {
         backgroundColor: c.accent,
         foregroundColor: c.accentInk,
         minimumSize: const Size(64, 48),
-        textStyle: const TextStyle(fontFamily: 'Barlow', fontWeight: FontWeight.w700, fontSize: 15),
+        textStyle: TextStyle(fontFamily: family, fontWeight: FontWeight.w700, fontSize: 15),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     ),
@@ -179,14 +235,14 @@ ThemeData buildTheme(Brightness brightness) {
         foregroundColor: c.ink,
         minimumSize: const Size(64, 44),
         side: BorderSide(color: c.line2),
-        textStyle: const TextStyle(fontFamily: 'Barlow', fontWeight: FontWeight.w600, fontSize: 14),
+        textStyle: TextStyle(fontFamily: family, fontWeight: FontWeight.w600, fontSize: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         foregroundColor: c.accentText,
-        textStyle: const TextStyle(fontFamily: 'Barlow', fontWeight: FontWeight.w700, fontSize: 14),
+        textStyle: TextStyle(fontFamily: family, fontWeight: FontWeight.w700, fontSize: 14),
       ),
     ),
     dividerColor: c.line,
@@ -196,7 +252,7 @@ ThemeData buildTheme(Brightness brightness) {
       indicatorColor: c.accent.withValues(alpha: 0.16),
       height: 68,
       labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
-            fontFamily: 'Barlow',
+            fontFamily: family,
             fontWeight: FontWeight.w700,
             fontSize: 12,
             color: states.contains(WidgetState.selected) ? c.accentText : c.tabOff,
@@ -206,17 +262,18 @@ ThemeData buildTheme(Brightness brightness) {
     ),
     snackBarTheme: SnackBarThemeData(
       backgroundColor: c.selBg,
-      contentTextStyle: TextStyle(color: c.selFg, fontFamily: 'Barlow', fontSize: 14),
+      contentTextStyle: TextStyle(color: c.selFg, fontFamily: family, fontSize: 14),
       behavior: SnackBarBehavior.floating,
     ),
   );
 }
 
-/// Condensed heading style used for section titles and the "Field Notes" wordmark.
+/// Heading style used for section titles and the "Field Observations" wordmark.
+/// Barlow Condensed by default; the chosen font (slightly smaller) otherwise.
 TextStyle condensed(double size, {Color? color, double letterSpacing = 0}) => TextStyle(
-      fontFamily: 'BarlowCondensed',
+      fontFamily: _headingFamily,
       fontWeight: FontWeight.w700,
-      fontSize: size,
+      fontSize: _headingFamily == 'BarlowCondensed' ? size : size * 0.86,
       height: 1.05,
       color: color,
       letterSpacing: letterSpacing,

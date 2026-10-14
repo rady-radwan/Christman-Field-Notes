@@ -41,6 +41,7 @@ enum _Step { email, code, name }
 
 class _SignInScreenState extends State<SignInScreen> {
   final _name = TextEditingController();
+  final _company = TextEditingController();
   final _email = TextEditingController();
   final _code = TextEditingController();
   _Step _step = _Step.email;
@@ -55,6 +56,7 @@ class _SignInScreenState extends State<SignInScreen> {
   void dispose() {
     _timer?.cancel();
     _name.dispose();
+    _company.dispose();
     _email.dispose();
     _code.dispose();
     super.dispose();
@@ -125,7 +127,7 @@ class _SignInScreenState extends State<SignInScreen> {
 
   Future<void> _saveName() => _run((state) async {
         if (_name.text.trim().isEmpty) throw RepoException('Enter your name.');
-        await state.updateMyName(_name.text);
+        await state.updateMyProfile(name: _name.text, company: _company.text);
         _finish();
       });
 
@@ -215,7 +217,7 @@ class _SignInScreenState extends State<SignInScreen> {
   List<Widget> _nameStep(FnColors c) => [
         Text('Welcome! What is your name?', textAlign: TextAlign.center, style: condensed(24)),
         const SizedBox(height: 6),
-        Text('This is how the team will see you on notes and replies.',
+        Text('This is how the team will see you on observations and in discussions.',
             textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: c.muted)),
         const SizedBox(height: 14),
         TextField(
@@ -224,6 +226,12 @@ class _SignInScreenState extends State<SignInScreen> {
           textCapitalization: TextCapitalization.words,
           autofillHints: const [AutofillHints.name],
           decoration: const InputDecoration(hintText: 'First and last name'),
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _company,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(hintText: 'Company or trade, e.g. Mechanical Contractor'),
           onSubmitted: (_) => _saveName(),
         ),
         const SizedBox(height: 14),
@@ -239,7 +247,7 @@ class _SignInScreenState extends State<SignInScreen> {
             borderRadius: BorderRadius.circular(10),
           ),
           child: Text(
-            'No shared server connected. Notes are saved on this computer only. '
+            'No shared server connected. Observations are saved on this computer only. '
             'The first account created here becomes the admin.',
             style: TextStyle(fontSize: 13, color: c.muted, height: 1.35),
           ),
@@ -297,7 +305,7 @@ class _SignInScreenState extends State<SignInScreen> {
                     const SizedBox(height: 18),
                     Center(child: Container(width: 48, height: 3, color: c.accent)),
                     const SizedBox(height: 18),
-                    Text('Field Notes', textAlign: TextAlign.center, style: condensed(40)),
+                    Text('Field Observations', textAlign: TextAlign.center, style: condensed(40)),
                     const SizedBox(height: 28),
                     ...body,
                     if (_error != null) ...[
@@ -451,15 +459,15 @@ class PendingBanner extends StatelessWidget {
     if (!state.isPending) return const SizedBox.shrink();
     final c = FnColors.of(context);
     return Material(
-      color: c.statusBg(NoteStatus.suspended),
+      color: c.statusBg(NoteStatus.inProgress),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(children: [
-          Icon(Icons.hourglass_top_rounded, size: 18, color: c.statusFg(NoteStatus.suspended)),
+          Icon(Icons.hourglass_top_rounded, size: 18, color: c.statusFg(NoteStatus.inProgress)),
           const SizedBox(width: 8),
           Expanded(
             child: Text('Your account is waiting for admin approval. You can look around until then.',
-                style: TextStyle(color: c.statusFg(NoteStatus.suspended), fontWeight: FontWeight.w600)),
+                style: TextStyle(color: c.statusFg(NoteStatus.inProgress), fontWeight: FontWeight.w600)),
           ),
           TextButton(onPressed: () => state.reload(quiet: true), child: const Text('Check again')),
         ]),

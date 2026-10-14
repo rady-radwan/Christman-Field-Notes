@@ -4,16 +4,20 @@ import 'package:provider/provider.dart';
 import '../models.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
+import '../util/dates.dart';
 
 /// Christman logo in the right color for light or dark mode.
 class BrandLogo extends StatelessWidget {
-  const BrandLogo({super.key, this.full = false, this.height = 20});
+  const BrandLogo({super.key, this.full = false, this.height = 20, this.onDark});
   final bool full;
   final double height;
 
+  /// Force the light-on-dark logo (true) or the dark-on-light one (false), e.g. on the sidebar.
+  final bool? onDark;
+
   @override
   Widget build(BuildContext context) {
-    final dark = FnColors.of(context).dark;
+    final dark = onDark ?? FnColors.of(context).dark;
     final kind = full ? 'full' : 'mark';
     return Image.asset(
       'assets/logo/christman-$kind-${dark ? 'dark' : 'light'}.png',
@@ -48,12 +52,83 @@ class StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = FnColors.of(context);
+    return Tooltip(
+      message: status.meaning,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: large ? 3 : 2),
+        decoration: BoxDecoration(color: c.statusBg(status), borderRadius: BorderRadius.circular(large ? 6 : 10)),
+        child: Text(
+          '${status.emoji} ${status.label}',
+          style: TextStyle(fontSize: large ? 13 : 12, fontWeight: FontWeight.w700, color: c.statusFg(status)),
+        ),
+      ),
+    );
+  }
+}
+
+/// "🔴 OVERDUE · 3 days" in red, or nothing when the observation is not overdue.
+class OverdueBadge extends StatelessWidget {
+  const OverdueBadge(this.note, {super.key, this.large = false});
+  final Note note;
+  final bool large;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!note.isOverdue) return const SizedBox.shrink();
+    final c = FnColors.of(context);
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 8, vertical: large ? 3 : 2),
-      decoration: BoxDecoration(color: c.statusBg(status), borderRadius: BorderRadius.circular(large ? 5 : 10)),
+      decoration: BoxDecoration(
+        color: c.urgentText.withValues(alpha: c.dark ? 0.18 : 0.10),
+        border: Border.all(color: c.urgentText.withValues(alpha: 0.6)),
+        borderRadius: BorderRadius.circular(large ? 6 : 10),
+      ),
       child: Text(
-        status.label,
-        style: TextStyle(fontSize: large ? 13 : 12, fontWeight: FontWeight.w700, color: c.statusFg(status)),
+        overdueText(note.dueAt!),
+        style: TextStyle(fontSize: large ? 13 : 12, fontWeight: FontWeight.w800, color: c.urgentText),
+      ),
+    );
+  }
+}
+
+/// Observation type with its icon, e.g. "Safety Concern".
+class TypeTag extends StatelessWidget {
+  const TypeTag(this.type, {super.key, this.large = false});
+  final ObsType type;
+  final bool large;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = FnColors.of(context);
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 7, vertical: large ? 2 : 1),
+      decoration: BoxDecoration(color: c.avatarBg, borderRadius: BorderRadius.circular(5)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(type.icon, size: large ? 15 : 13, color: c.avatarInk),
+        const SizedBox(width: 4),
+        Text(type.label, style: TextStyle(fontSize: large ? 13 : 12, fontWeight: FontWeight.w600, color: c.avatarInk)),
+      ]),
+    );
+  }
+}
+
+/// Observation number, e.g. "NCMC-MEP-001", in a monospace-like tag.
+class CodeTag extends StatelessWidget {
+  const CodeTag(this.note, {super.key, this.large = false});
+  final Note note;
+  final bool large;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = FnColors.of(context);
+    return Text(
+      note.displayCode,
+      style: TextStyle(
+        fontSize: large ? 14 : 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.4,
+        color: c.accentText,
+        fontFeatures: const [FontFeature.tabularFigures()],
       ),
     );
   }
@@ -88,14 +163,18 @@ class FnChip extends StatelessWidget {
     this.selectedColor,
     this.icon,
     this.square = false,
+    this.dense = false,
   });
 
   final String label;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Color? selectedColor;
   final IconData? icon;
   final bool square;
+
+  /// Smaller box for compact choices (category, priority).
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
@@ -115,15 +194,14 @@ class FnChip extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(square ? 8 : 20),
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 38),
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            alignment: Alignment.center,
+          // Sized by its label only (no alignment), so chips never stretch to the full width.
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: dense ? 11 : 14, vertical: dense ? 6 : 9),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (icon != null) ...[Icon(icon, size: 16, color: fg), const SizedBox(width: 6)],
-                Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: fg)),
+                if (icon != null) ...[Icon(icon, size: dense ? 15 : 16, color: fg), const SizedBox(width: 6)],
+                Text(label, style: TextStyle(fontSize: dense ? 13 : 14, fontWeight: FontWeight.w600, color: fg)),
               ],
             ),
           ),
@@ -179,7 +257,7 @@ class RefImage extends StatelessWidget {
   }
 }
 
-/// Square thumbnail of a note's first photo, with a photo count.
+/// Square thumbnail of an observation's first photo, with a photo count.
 class NoteThumb extends StatelessWidget {
   const NoteThumb(this.note, {super.key, this.size = 88, this.showCount = true});
   final Note note;
@@ -224,7 +302,7 @@ class NoteThumb extends StatelessWidget {
   }
 }
 
-/// Grays out solved and deactivated notes.
+/// Grays out resolved and voided observations.
 class ClosedFade extends StatelessWidget {
   const ClosedFade({super.key, required this.closed, required this.child});
   final bool closed;

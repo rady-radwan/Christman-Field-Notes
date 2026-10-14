@@ -24,6 +24,7 @@ class LocalRepo extends Repo {
   List<Project> _projects = [];
   Map<String, Set<String>> _members = {};
   List<Note> _notes = [];
+  List<ProjectInvite> _invites = [];
   String? _currentUserId;
 
   static Future<LocalRepo> open() async {
@@ -49,7 +50,11 @@ class LocalRepo extends Repo {
         (k, v) => MapEntry(k.toString(), ((v as List?) ?? []).map((e) => e.toString()).toSet()),
       );
       _notes = ((j['notes'] as List?) ?? []).map((e) => Note.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+      _invites = ((j['invites'] as List?) ?? [])
+          .map((e) => ProjectInvite.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
       _currentUserId = j['current_user_id'] as String?;
+      _numberOldNotes();
     } catch (_) {
       // Keep a copy of an unreadable file instead of losing it.
       await _file.copy(p.join(_dir.path, 'data-unreadable-${DateTime.now().millisecondsSinceEpoch}.json'));
@@ -58,11 +63,12 @@ class LocalRepo extends Repo {
 
   Future<void> _save() async {
     final data = {
-      'version': 1,
+      'version': 2,
       'users': _users.map((u) => u.toJson()).toList(),
       'projects': _projects.map((pr) => pr.toJson()).toList(),
       'members': _members.map((k, v) => MapEntry(k, v.toList())),
       'notes': _notes.map((n) => n.toJson()).toList(),
+      'invites': _invites.map((i) => i.toJson()).toList(),
       'current_user_id': _currentUserId,
     };
     final tmp = File('${_file.path}.tmp');
@@ -85,10 +91,49 @@ class LocalRepo extends Repo {
     return me;
   }
 
-  Future<String> _savePhoto(List<int> bytes) async {
-    final name = '${_uuid.v4()}.jpg';
+  Future<String> _savePhoto(List<int> bytes, {String ext = 'jpg'}) async {
+    final name = '${_uuid.v4()}.$ext';
     await File(p.join(_photosDir, name)).writeAsBytes(bytes, flush: true);
     return 'file:$name';
+  }
+
+  Future<List<String>> _saveAudio(List<NewAudio> clips) async =>
+      [for (final a in clips) await _savePhoto(a.bytes, ext: a.extension)];
+
+  Project? _project(String id) {
+    for (final pr in _projects) {
+      if (pr.id == id) return pr;
+    }
+    return null;
+  }
+
+  /// Next number and code for a new observation in this project and category.
+  (int, String) _nextNumber(String projectId, String category) {
+    var max = 0;
+    for (final n in _notes) {
+      if (n.projectId == projectId && n.category == category && (n.number ?? 0) > max) max = n.number!;
+    }
+    final pr = _project(projectId);
+    final num = max + 1;
+    final code = '${pr?.code ?? 'PRJ'}-${pr?.categoryCode(category) ?? suggestCategoryAbbr(category)}-'
+        '${num.toString().padLeft(3, '0')}';
+    return (num, code);
+  }
+
+  /// Observations saved by older versions get numbers, oldest first.
+  void _numberOldNotes() {
+    final old = _notes.where((n) => n.number == null).toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    for (final n in old) {
+      final (num, code) = _nextNumber(n.projectId, n.category);
+      final i = _notes.indexOf(n);
+      _notes[i] = Note.fromJson({...n.toJson(), 'number': num, 'code': code});
+    }
+  }
+
+  bool _isMember(String projectId) {
+    final me = _me;
+    if (me == null || !me.isApproved) return false;
+    return me.isAdmin || (_members[projectId]?.contains(me.id) ?? false);
   }
 
   @override
@@ -148,9 +193,9 @@ class LocalRepo extends Repo {
   Future<AppUser?> refreshMe() async => _me;
 
   @override
-  Future<AppUser> updateMyName(String name) async {
+  Future<AppUser> updateMyProfile({required String name, required String company}) async {
     final me = _requireMe();
-    final updated = me.copyWith(name: name.trim());
+    final updated = me.copyWith(name: name.trim(), company: company.trim());
     _users = [for (final u in _users) u.id == me.id ? updated : u];
     await _save();
     return updated;
@@ -162,7 +207,11 @@ class LocalRepo extends Repo {
     if (me != null && me.isAdmin) return List.of(_users);
     final visible = _users.where((u) => u.isApproved || u.id == me?.id);
     // Guests see names only, not email addresses.
-    return me == null ? visible.map((u) => AppUser(id: u.id, name: u.name, email: '', isAdmin: u.isAdmin, status: u.status)).toList() : visible.toList();
+    return me == null
+        ? visible
+            .map((u) => AppUser(id: u.id, name: u.name, email: '', isAdmin: u.isAdmin, status: u.status, company: u.company))
+            .toList()
+        : visible.toList();
   }
 
   @override
@@ -174,13 +223,21 @@ class LocalRepo extends Repo {
   }
 
   @override
-  Future<List<Project>> projects() async => List.of(_projects); // everyone can read
+  Future<List<Project>> projects() async =>
+      _projects.where((pr) => pr.guestVisible || _isMember(pr.id)).toList(); // members only, unless guests may look
 
   @override
-  Future<Project> createProject(String name) async {
+  Future<Project> createProject(Project draft) async {
     final me = _requireMe();
     if (!me.isAdmin) throw RepoException('Only an admin can add projects.');
-    final pr = Project(id: _uuid.v4(), name: name.trim(), categories: List.of(defaultCategories));
+    final pr = Project(
+      id: _uuid.v4(),
+      name: draft.name.trim(),
+      categories: draft.categories,
+      abbr: draft.abbr.trim().toUpperCase(),
+      categoryAbbrs: draft.categoryAbbrs,
+      guestVisible: draft.guestVisible,
+    );
     _projects.add(pr);
     _members[pr.id] = {me.id};
     await _save();
@@ -207,7 +264,63 @@ class LocalRepo extends Repo {
   }
 
   @override
-  Future<List<Note>> notes(String projectId) async => _notes.where((n) => n.projectId == projectId).toList();
+  Future<List<ProjectInvite>> invites() async {
+    final me = _me;
+    if (me == null) return [];
+    return _invites.where((i) => me.isAdmin || i.invitedBy == me.id || _isMember(i.projectId)).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  @override
+  Future<void> suggestMember(String projectId, {required String email, required String name, required String company}) async {
+    final me = _requireMe();
+    if (!_isMember(projectId)) throw RepoException('Only members of this project can suggest people.');
+    final e = email.trim().toLowerCase();
+    if (_invites.any((i) => i.projectId == projectId && i.isPending && i.email == e)) {
+      throw RepoException('That person is already waiting for approval on this project.');
+    }
+    _invites.add(ProjectInvite(
+      id: _uuid.v4(),
+      projectId: projectId,
+      email: e,
+      name: name.trim(),
+      company: company.trim(),
+      invitedBy: me.id,
+      status: 'pending',
+      createdAt: DateTime.now(),
+    ));
+    await _save();
+  }
+
+  @override
+  Future<void> approveInvite(ProjectInvite invite) async {
+    if (!_requireMe().isAdmin) throw RepoException('Only an admin can approve invitations.');
+    _invites = [for (final i in _invites) i.id == invite.id ? i.copyWith(status: 'approved') : i];
+    final idx = _users.indexWhere((u) => u.email.toLowerCase() == invite.email.toLowerCase());
+    if (idx >= 0) {
+      final u = _users[idx];
+      _users[idx] = u.copyWith(
+        status: u.status == MemberStatus.removed ? u.status : MemberStatus.approved,
+        company: u.company.isEmpty ? invite.company : u.company,
+      );
+      _members.putIfAbsent(invite.projectId, () => {}).add(u.id);
+    }
+    await _save();
+  }
+
+  @override
+  Future<void> declineInvite(ProjectInvite invite) async {
+    if (!_requireMe().isAdmin) throw RepoException('Only an admin can decline invitations.');
+    _invites = [for (final i in _invites) i.id == invite.id ? i.copyWith(status: 'declined') : i];
+    await _save();
+  }
+
+  @override
+  Future<List<Note>> notes(String projectId) async {
+    final pr = _project(projectId);
+    if (pr == null || !(pr.guestVisible || _isMember(projectId))) return [];
+    return _notes.where((n) => n.projectId == projectId).toList();
+  }
 
   @override
   Future<Note> createNote(String projectId, NoteDraft draft) async {
@@ -217,6 +330,7 @@ class LocalRepo extends Repo {
       photos.add(await _savePhoto(b));
     }
     final now = DateTime.now();
+    final (num, code) = _nextNumber(projectId, draft.category);
     final note = Note(
       id: _uuid.v4(),
       projectId: projectId,
@@ -224,10 +338,16 @@ class LocalRepo extends Repo {
       comment: draft.comment,
       category: draft.category,
       priority: draft.priority,
-      status: NoteStatus.active,
+      status: NoteStatus.open,
       issuerId: me.id,
       assignedIds: draft.assignedIds,
       photos: photos,
+      obsType: draft.obsType,
+      location: draft.location.trim(),
+      dueAt: draft.dueAt,
+      number: num,
+      code: code,
+      audio: await _saveAudio(draft.newAudio),
       createdAt: now,
       updatedAt: now,
     );
@@ -237,16 +357,18 @@ class LocalRepo extends Repo {
   }
 
   @override
-  Future<Note> updateNote(Note note, {List<List<int>> addPhotos = const []}) async {
+  Future<Note> updateNote(Note note, {List<List<int>> addPhotos = const [], List<NewAudio> addAudio = const []}) async {
     _requireMe();
     final added = <String>[];
     for (final b in addPhotos) {
       added.add(await _savePhoto(b));
     }
+    final addedAudio = await _saveAudio(addAudio);
     final i = _notes.indexWhere((n) => n.id == note.id);
-    if (i < 0) throw RepoException('This note no longer exists.');
+    if (i < 0) throw RepoException('This observation no longer exists.');
     final updated = note.copyWith(
       photos: [...note.photos, ...added],
+      audio: [...note.audio, ...addedAudio],
       updatedAt: DateTime.now(),
       replies: _notes[i].replies,
     );
@@ -263,7 +385,7 @@ class LocalRepo extends Repo {
   }
 
   @override
-  Future<Reply> addReply(Note note, String text, List<List<int>> photos) async {
+  Future<Reply> addReply(Note note, String text, List<List<int>> photos, {List<NewAudio> audio = const []}) async {
     final me = _requireMe();
     final refs = <String>[];
     for (final b in photos) {
@@ -275,10 +397,11 @@ class LocalRepo extends Repo {
       authorId: me.id,
       text: text,
       photos: refs,
+      audio: await _saveAudio(audio),
       createdAt: DateTime.now(),
     );
     final i = _notes.indexWhere((n) => n.id == note.id);
-    if (i < 0) throw RepoException('This note no longer exists.');
+    if (i < 0) throw RepoException('This observation no longer exists.');
     _notes[i] = _notes[i].copyWith(replies: [..._notes[i].replies, reply]);
     await _save();
     return reply;
@@ -292,13 +415,15 @@ class LocalRepo extends Repo {
     await _save();
   }
 
-  @override
-  Future<ImageProvider> image(String ref) async {
-    final name = ref.startsWith('file:') ? ref.substring(5) : ref;
-    return FileImage(File(p.join(_photosDir, name)));
-  }
+  String _filePath(String ref) => p.join(_photosDir, ref.startsWith('file:') ? ref.substring(5) : ref);
 
-  /// Adds a few example notes (no photos) so the screens can be tried out.
+  @override
+  Future<ImageProvider> image(String ref) async => FileImage(File(_filePath(ref)));
+
+  @override
+  Future<Uri> audioUri(String ref) async => Uri.file(_filePath(ref));
+
+  /// Adds a few example observations (no photos) so the screens can be tried out.
   Future<void> addSampleNotes(String projectId) async {
     final me = _requireMe();
     final now = DateTime.now();
@@ -307,9 +432,16 @@ class LocalRepo extends Repo {
       return DateTime(d.year, d.month, d.day, hour, 10);
     }
 
-    Note n(String name, String cat, Priority pr, NoteStatus st, int days, String comment, {bool mine = false}) {
+    Note n(String name, String cat, Priority pr, NoteStatus st, int days, String comment,
+        {bool mine = false, ObsType type = ObsType.fieldObservation, String location = '', int? dueInDays}) {
       final created = ago(days, 9 + days % 6);
+      final (num, code) = _nextNumber(projectId, cat);
       return Note(
+        obsType: type,
+        location: location,
+        dueAt: dueInDays == null ? null : endOfDay(now.add(Duration(days: dueInDays))),
+        number: num,
+        code: code,
         id: _uuid.v4(),
         projectId: projectId,
         name: name,
@@ -325,22 +457,46 @@ class LocalRepo extends Repo {
       );
     }
 
-    _notes.addAll([
-      n('Fire damper missing at corridor 3B', 'MEP', Priority.urgent, NoteStatus.active, 0,
-          'Fire damper is missing at the rated corridor wall above the ceiling grid. Please install before close-in.'),
-      n('Open edge at Level 4 east slab, no guardrail', 'Safety', Priority.urgent, NoteStatus.active, 1,
-          'Guardrail removed for the hoist and not put back. Stay clear until restored.'),
-      n('Beam B-12 connection missing bolts', 'Steel', Priority.critical, NoteStatus.active, 4,
-          'Two bolts missing at the shear tab. Complete and re-inspect before decking.', mine: true),
-      n('Duct clashes with sprinkler main, Room 214', 'MEP', Priority.high, NoteStatus.active, 5,
-          'Supply duct runs into the sprinkler main. Coordinate a reroute and update the model.'),
-      n('Honeycombing on column C-7', 'Structure', Priority.high, NoteStatus.suspended, 6,
-          'On hold until the engineer of record reviews the repair method.'),
-      n('Debris blocking stair 2 landing', 'Safety', Priority.low, NoteStatus.solved, 7,
-          'Housekeeping needed at the stair 2 landing on Level 3.'),
-      n('Curtain wall anchor spacing', 'Architecture', Priority.medium, NoteStatus.suspended, 19,
-          'Spacing looks wider than the shop drawings. Waiting on the facade consultant.'),
-    ]);
+    final samples = [
+      (
+        'Fire damper missing at corridor 3B', 'MEP', Priority.urgent, NoteStatus.open, 0,
+        'Fire damper is missing at the rated corridor wall above the ceiling grid. Please install before close-in.',
+        ObsType.constructionIssue, 'Level 3, corridor 3B', 2, false,
+      ),
+      (
+        'Open edge at Level 4 east slab, no guardrail', 'Safety', Priority.urgent, NoteStatus.inProgress, 1,
+        'Guardrail removed for the hoist and not put back. Stay clear until restored.',
+        ObsType.safetyConcern, 'Level 4, east slab edge', -1, false,
+      ),
+      (
+        'Beam B-12 connection missing bolts', 'Steel', Priority.critical, NoteStatus.pendingVerification, 4,
+        'Two bolts missing at the shear tab. Complete and re-inspect before decking.',
+        ObsType.constructionIssue, 'Grid C/12, Level 2', 1, true,
+      ),
+      (
+        'Duct clashes with sprinkler main, Room 214', 'MEP', Priority.high, NoteStatus.open, 5,
+        'Supply duct runs into the sprinkler main. Coordinate a reroute and update the model.',
+        ObsType.coordinationRequest, 'Room 214', -3, false,
+      ),
+      (
+        'Honeycombing on column C-7', 'Structure', Priority.high, NoteStatus.onHold, 6,
+        'On hold until the engineer of record reviews the repair method.',
+        ObsType.fieldObservation, 'Column C-7, Level 1', null, false,
+      ),
+      (
+        'Debris blocking stair 2 landing', 'Safety', Priority.low, NoteStatus.resolved, 7,
+        'Housekeeping needed at the stair 2 landing on Level 3.',
+        ObsType.followUp, 'Stair 2, Level 3', null, false,
+      ),
+      (
+        'Curtain wall anchor spacing', 'Architecture', Priority.medium, NoteStatus.onHold, 19,
+        'Spacing looks wider than the shop drawings. Waiting on the facade consultant.',
+        ObsType.coordinationRequest, 'North elevation', 10, false,
+      ),
+    ];
+    for (final x in samples) {
+      _notes.add(n(x.$1, x.$2, x.$3, x.$4, x.$5, x.$6, type: x.$7, location: x.$8, dueInDays: x.$9, mine: x.$10));
+    }
     await _save();
   }
 

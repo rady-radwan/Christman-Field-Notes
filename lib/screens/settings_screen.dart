@@ -6,8 +6,10 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import 'admin_screen.dart';
 import 'sign_in_screen.dart';
+import 'team.dart';
 
-const appVersion = '0.6.0';
+const appVersion = '0.7.0';
+const appName = 'Christman Field Observations';
 
 Future<void> showServerSettings(BuildContext context) async {
   final state = context.read<AppState>();
@@ -44,7 +46,7 @@ Future<void> showServerSettings(BuildContext context) async {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Saved'),
-        content: const Text('Close Field Notes and open it again to switch to the new connection.'),
+        content: const Text('Close Field Observations and open it again to switch to the new connection.'),
         actions: [FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
       ),
     );
@@ -68,12 +70,77 @@ class SettingsScreen extends StatelessWidget {
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
         );
+    final project = state.project;
+    final showTeam = project != null && state.canContribute && state.isMemberOf(project.id);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+          constraints: const BoxConstraints(maxWidth: 860),
           child: ListView(padding: const EdgeInsets.all(16), children: [
+            card([
+              const SectionLabel('Account'),
+              const SizedBox(height: 10),
+              if (state.isGuest)
+                Row(children: [
+                  Expanded(
+                    child: Text('You are looking around as a guest. Sign in to report observations and join discussions.',
+                        style: TextStyle(color: c.muted)),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton(onPressed: () => openSignIn(context), child: const Text('Sign in')),
+                ])
+              else
+                Row(children: [
+                  Avatar(name: state.me?.name ?? '?', size: 40),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(state.me?.name ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                      Text(
+                        [
+                          if ((state.me?.company ?? '').isNotEmpty) state.me!.company,
+                          state.me?.email ?? '',
+                          if (state.isAdmin) 'Admin',
+                          if (state.isPending) 'Waiting for approval',
+                        ].join(' · '),
+                        style: TextStyle(color: c.muted),
+                      ),
+                    ]),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => showEditProfileDialog(context),
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    label: const Text('Edit'),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: () async {
+                      Navigator.of(context).popUntil((r) => r.isFirst);
+                      await state.signOut();
+                    },
+                    child: const Text('Sign out'),
+                  ),
+                ]),
+              if (!state.isGuest && (state.me?.company ?? '').isEmpty) ...[
+                const SizedBox(height: 8),
+                Text('Tip: add your company or trade (Edit) so the team and the dashboard show it.',
+                    style: TextStyle(fontSize: 13, color: c.accentText)),
+              ],
+              if (state.isAdmin) ...[
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminScreen())),
+                  icon: const Icon(Icons.admin_panel_settings_outlined),
+                  label: Text(
+                    state.pendingInvites.isEmpty
+                        ? 'Admin: people, projects, categories'
+                        : 'Admin: people, projects, categories · ${state.pendingInvites.length} member request(s)',
+                  ),
+                ),
+              ],
+            ]),
+            if (showTeam) card([ProjectTeamPanel(projectId: project.id)]),
             card([
               const SectionLabel('Appearance'),
               const SizedBox(height: 12),
@@ -86,49 +153,12 @@ class SettingsScreen extends StatelessWidget {
                 selected: {state.themeMode},
                 onSelectionChanged: (s) => state.setThemeMode(s.first),
               ),
-            ]),
-            card([
-              const SectionLabel('Account'),
-              const SizedBox(height: 10),
-              if (state.isGuest)
-                Row(children: [
-                  Expanded(
-                    child: Text('You are looking around as a guest. Sign in to add notes and replies.',
-                        style: TextStyle(color: c.muted)),
-                  ),
-                  const SizedBox(width: 12),
-                  FilledButton(
-                    onPressed: () => openSignIn(context),
-                    child: const Text('Sign in'),
-                  ),
-                ])
-              else
-              Row(children: [
-                Avatar(name: state.me?.name ?? '?', size: 40),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(state.me?.name ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                    Text('${state.me?.email ?? ''}${state.isAdmin ? ' · Admin' : ''}${state.isPending ? ' · Waiting for approval' : ''}',
-                        style: TextStyle(color: c.muted)),
-                  ]),
-                ),
-                OutlinedButton(
-                  onPressed: () async {
-                    Navigator.of(context).popUntil((r) => r.isFirst);
-                    await state.signOut();
-                  },
-                  child: const Text('Sign out'),
-                ),
+              const SizedBox(height: 18),
+              Text('Font', style: TextStyle(fontWeight: FontWeight.w700, color: c.ink2)),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final f in fontChoices) _FontBox(family: f, selected: state.fontChoice == f, onTap: () => state.setFont(f)),
               ]),
-              if (state.isAdmin) ...[
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminScreen())),
-                  icon: const Icon(Icons.admin_panel_settings_outlined),
-                  label: const Text('Admin: users, projects, categories'),
-                ),
-              ],
             ]),
             card([
               const SectionLabel('Data'),
@@ -137,8 +167,8 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 state.repo.isServer
-                    ? 'Everyone on the project sees the same notes.'
-                    : 'Only this computer can see these notes until a shared server is connected.',
+                    ? 'Everyone on a project sees the same observations.'
+                    : 'Only this computer can see these observations until a shared server is connected.',
                 style: TextStyle(color: c.muted),
               ),
               const SizedBox(height: 12),
@@ -153,10 +183,10 @@ class SettingsScreen extends StatelessWidget {
                   OutlinedButton.icon(
                     onPressed: () async {
                       await state.addSampleNotes();
-                      if (context.mounted) showInfo(context, 'Sample notes added.');
+                      if (context.mounted) showInfo(context, 'Sample observations added.');
                     },
                     icon: const Icon(Icons.playlist_add),
-                    label: const Text('Add sample notes'),
+                    label: const Text('Add sample observations'),
                   ),
               ]),
             ]),
@@ -165,9 +195,54 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: 10),
               const BrandLogo(height: 20),
               const SizedBox(height: 8),
-              Text('Christman Field Notes, version $appVersion', style: TextStyle(color: c.muted)),
+              Text('$appName, version $appVersion', style: TextStyle(color: c.muted)),
             ]),
           ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// A font choice shown in its own font.
+class _FontBox extends StatelessWidget {
+  const _FontBox({required this.family, required this.selected, required this.onTap});
+  final String family;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = FnColors.of(context);
+    final f = family.isEmpty ? 'Barlow' : family;
+    return Material(
+      color: selected ? c.avatarBg : c.surface2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: selected ? c.accent : c.line, width: selected ? 2 : 1),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: SizedBox(
+          width: 182,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Text('Aa', style: TextStyle(fontFamily: f, fontSize: 22, fontWeight: FontWeight.w700, color: c.ink)),
+                const Spacer(),
+                if (selected) Icon(Icons.check_circle, size: 18, color: c.accentText),
+              ]),
+              const SizedBox(height: 2),
+              Text(fontLabel(family),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontFamily: f, fontSize: 14, fontWeight: FontWeight.w600, color: c.ink)),
+              Text('Fire damper, Level 3',
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontFamily: f, fontSize: 12, color: c.muted)),
+            ]),
+          ),
         ),
       ),
     );

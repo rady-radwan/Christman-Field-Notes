@@ -1,12 +1,14 @@
-# Christman Field Notes
+# Christman Field Observations
 
-Field issue notes for project teams. Someone on site:
-1. takes photos
-2. marks them up (arrows, boxes, circles, clouds, text)
-3. names the issue, picks a category and priority, and assigns people
-4. publishes it
+Field observations for project teams. Someone on site:
+1. takes photos and marks them up (arrows, boxes, circles, clouds, text)
+2. gives the observation a title, type, category, priority, location and due date
+3. describes it in text or a voice message, and assigns people
+4. publishes it; it gets a number like NCMC-MEP-001
 
-The team then replies with text and their own marked-up photos.
+The team discusses it with text, voice messages and marked-up photos. The reporter or an admin
+moves it through Open, In Progress, Pending Verification and Resolved (or On Hold / Voided).
+A dashboard shows totals, overdue items, and open items by category and by person.
 
 Built with Flutter, so one codebase makes the Windows, Android and iOS apps.
 Windows ships first.
@@ -43,7 +45,7 @@ Windows may show a SmartScreen warning because the installer isn't code-signed y
 ## Data
 
 - **No server connected:** everything is saved on that computer, in
-  `%APPDATA%\The Christman Company\Christman Field Notes\FieldNotes`. The first account created becomes the admin.
+  `%APPDATA%\The Christman Company\Christman Field Observations\FieldNotes`. The first account created becomes the admin.
 - **Shared server:** see [SERVER-SETUP.md](SERVER-SETUP.md) (Supabase, about 10 minutes).
 
 ## Development
